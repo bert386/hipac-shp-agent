@@ -125,19 +125,36 @@ def exec_receiver_command(
 
     try:
         stdin, stdout, stderr = client.exec_command(command, timeout=exec_timeout)
+        chan = stdout.channel
+
+        if expect_disconnect:
+            # The receiver is about to reboot. Never block on a dying socket:
+            # wait briefly for an exit status, otherwise assume the reboot took
+            # the connection down — which is success.
+            deadline = time.time() + 5
+            while time.time() < deadline and not chan.exit_status_ready():
+                time.sleep(0.2)
+            if chan.exit_status_ready():
+                return chan.recv_exit_status(), _safe_read(stdout), _safe_read(stderr)
+            return 0, "(reboot issued; connection dropping)", ""
+
+        chan.settimeout(exec_timeout)
         try:
-            code = stdout.channel.recv_exit_status()
-            out = stdout.read().decode("utf-8", "replace")
-            err = stderr.read().decode("utf-8", "replace")
-        except (socket.timeout, EOFError, paramiko.SSHException):
-            if expect_disconnect:
-                return 0, "(connection closed after command; assumed success)", ""
-            raise
-        if code == -1 and expect_disconnect:
-            return 0, out or "(rebooting)", err
+            out = _safe_read(stdout)
+            err = _safe_read(stderr)
+            code = chan.recv_exit_status()
+        except (socket.timeout, EOFError, paramiko.SSHException) as exc:
+            raise ReceiverUnreachable(f"{host}: {exc}") from exc
         return code, out, err
     finally:
         try:
             client.close()
         except Exception:
             pass
+
+
+def _safe_read(stream) -> str:
+    try:
+        return stream.read().decode("utf-8", "replace")
+    except Exception:
+        return ""

@@ -59,42 +59,46 @@ class CommandRunner(threading.Thread):
         params = cmd.get("params") or {}
         receiver = cmd.get("receiver") or {}
 
-        ip = self._resolve_ip(receiver) or receiver.get("ip_address")
-        if not ip:
-            self._report(cfg, cid, "failed", error="no known IP for receiver")
-            return
-
+        # Whatever happens below, the command must produce a reported result so
+        # it never sits at "sent" forever.
         try:
-            command, expect_disconnect = build_command(action, params)
-        except (ValueError, UnknownAction) as exc:
-            log.warning("rejected command %s (%s): %s", cid, action, exc)
-            self._report(cfg, cid, "failed", error=f"rejected: {exc}")
-            return
+            ip = self._resolve_ip(receiver) or receiver.get("ip_address")
+            if not ip:
+                self._report(cfg, cid, "failed", error="no known IP for receiver")
+                return
 
-        log.info("executing command %s (%s) on %s", cid, action, ip)
-        try:
-            code, out, err = exec_receiver_command(
-                host=ip,
-                user=cfg["ssh_user"],
-                key_path=cfg["ssh_key_path"],
-                command=command,
-                connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
-                expect_disconnect=expect_disconnect,
+            try:
+                command, expect_disconnect = build_command(action, params)
+            except (ValueError, UnknownAction) as exc:
+                log.warning("rejected command %s (%s): %s", cid, action, exc)
+                self._report(cfg, cid, "failed", error=f"rejected: {exc}")
+                return
+
+            log.info("executing command %s (%s) on %s", cid, action, ip)
+            try:
+                code, out, err = exec_receiver_command(
+                    host=ip,
+                    user=cfg["ssh_user"],
+                    key_path=cfg["ssh_key_path"],
+                    command=command,
+                    connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
+                    expect_disconnect=expect_disconnect,
+                )
+            except ReceiverUnreachable as exc:
+                self._report(cfg, cid, "failed", error=f"unreachable: {exc}")
+                return
+
+            status = "done" if code == 0 else "failed"
+            log.info("command %s finished: %s (exit %s)", cid, status, code)
+            self._report(
+                cfg, cid, status,
+                output=(out or "")[:4000],
+                exit_code=code,
+                error=((err or "")[:2000] if code != 0 else None),
             )
-        except ReceiverUnreachable as exc:
-            self._report(cfg, cid, "failed", error=f"unreachable: {exc}")
-            return
-        except Exception as exc:  # noqa: BLE001 - report anything back to the dashboard
-            self._report(cfg, cid, "failed", error=str(exc))
-            return
-
-        status = "done" if code == 0 else "failed"
-        self._report(
-            cfg, cid, status,
-            output=(out or "")[:4000],
-            exit_code=code,
-            error=((err or "")[:2000] if code != 0 else None),
-        )
+        except Exception as exc:  # noqa: BLE001 - never let a command orphan
+            log.exception("command %s crashed", cid)
+            self._report(cfg, cid, "failed", error=str(exc)[:2000])
 
     def _resolve_ip(self, receiver: dict) -> str | None:
         """Prefer the current IP we last saw for this MAC over the server's."""
