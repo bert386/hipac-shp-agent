@@ -33,6 +33,8 @@ class Poller(threading.Thread):
             "last_found": 0,
             "last_error": None,
             "pending_upload": 0,
+            "last_upload": None,
+            "last_upload_count": 0,
         }
 
     # -- control -----------------------------------------------------------
@@ -128,6 +130,8 @@ class Poller(threading.Thread):
             )
             self.storage.mark_uploaded(accepted)
             self.status["pending_upload"] = self.storage.pending_count()
+            self.status["last_upload"] = _now_iso()
+            self.status["last_upload_count"] = len(accepted)
             log.info("uploaded %d results", len(accepted))
             return len(accepted)
         except pusher.PushError as exc:

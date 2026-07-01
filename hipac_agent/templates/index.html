@@ -14,6 +14,7 @@
     </div>
     <div>
       <p class="muted">Pending upload: {{ status.pending_upload }}</p>
+      <p class="muted">Last upload: {{ status.last_upload or "never" }}{% if status.last_upload_count %} ({{ status.last_upload_count }} sent){% endif %}</p>
       {% if status.last_error %}<p class="muted">Last error: {{ status.last_error }}</p>{% endif %}
       <div style="display:flex; gap:8px; margin-top:8px;">
         <form method="post" action="{{ url_for('scan_now') }}">

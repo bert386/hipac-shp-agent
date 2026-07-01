@@ -11,7 +11,7 @@ import os
 import threading
 
 from flask import (
-    Flask, redirect, render_template, request, session, url_for, flash,
+    Flask, jsonify, redirect, render_template, request, session, url_for, flash,
 )
 
 from . import config
@@ -100,6 +100,17 @@ def create_app() -> Flask:
         _poller.trigger_now()
         flash("Scan triggered — results will appear shortly.")
         return redirect(url_for("index"))
+
+    @app.route("/status")
+    def status():
+        # Read-only, non-sensitive, LAN-only — no auth so it's easy to curl.
+        cfg = config.load()
+        return jsonify({
+            **_poller.status,
+            "site_name": cfg.get("site_name"),
+            "poll_interval_minutes": cfg.get("poll_interval_minutes"),
+            "server_url": cfg.get("server_url"),
+        })
 
     @app.route("/upload-now", methods=["POST"])
     @login_required
