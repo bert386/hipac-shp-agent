@@ -40,6 +40,7 @@ DEFAULTS = {
     "poll_interval_minutes": 60,
     "excluded_ips": [],
     "arp_scan_timeout": 120,
+    "arp_scan_retries": 5,           # more retries = fewer missed hosts on flaky nets
     # How often to check the server for pending maintenance commands.
     "command_poll_seconds": 60,
     # SSH into receivers

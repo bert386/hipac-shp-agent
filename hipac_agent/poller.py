@@ -67,10 +67,21 @@ class Poller(threading.Thread):
                 cfg["interface"], cfg["subnet"],
                 use_sudo=cfg.get("use_sudo", True),
                 timeout=int(cfg.get("arp_scan_timeout", 120)),
+                retries=int(cfg.get("arp_scan_retries", 5)),
             )
+            # Backstop for flaky arp-scan: also poll receivers we've recorded
+            # before, at their last-known IP, even if this scan missed them.
+            seen_ips = {d["ip"] for d in devices}
+            for result in self.storage.latest_per_receiver():
+                rec = result.get("receiver", {})
+                kip = rec.get("ip_address") or result.get("source_ip")
+                if kip and kip not in seen_ips:
+                    devices.append({"ip": kip, "mac": rec.get("mac_address"), "vendor": "(known)"})
+                    seen_ips.add(kip)
+
             excluded = set(cfg.get("excluded_ips") or [])
             targets = [d for d in devices if d["ip"] not in excluded]
-            log.info("scan found %d devices, %d after exclusions", len(devices), len(targets))
+            log.info("scan found %d devices (incl. known), %d after exclusions", len(devices), len(targets))
 
             for dev in targets:
                 if self._stop.is_set():

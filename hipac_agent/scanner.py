@@ -30,8 +30,19 @@ def parse_arp_output(stdout: str) -> list[dict]:
     return list(devices.values())
 
 
-def scan(interface: str, subnet: str, use_sudo: bool = True, timeout: int = 120) -> list[dict]:
+def scan(
+    interface: str,
+    subnet: str,
+    use_sudo: bool = True,
+    timeout: int = 120,
+    retries: int = 5,
+    backoff: float = 2.0,
+) -> list[dict]:
     """Run arp-scan and return a list of ``{ip, mac, vendor}`` dicts.
+
+    ``retries``/``backoff`` make discovery reliable on flaky networks — arp-scan
+    is best-effort and drops slow-responding hosts with its default 2 retries,
+    which is how a site's receivers can go missing from a scan entirely.
 
     Raises ``FileNotFoundError`` if arp-scan is not installed and
     ``subprocess.TimeoutExpired`` if it hangs.
@@ -39,7 +50,12 @@ def scan(interface: str, subnet: str, use_sudo: bool = True, timeout: int = 120)
     cmd = []
     if use_sudo:
         cmd.append("sudo")
-    cmd += ["arp-scan", "-I", interface, subnet]
+    cmd += [
+        "arp-scan",
+        f"--retry={int(retries)}",
+        f"--backoff={backoff}",
+        "-I", interface, subnet,
+    ]
     proc = subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout, check=False
     )
