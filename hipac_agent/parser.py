@@ -73,6 +73,19 @@ def parse_screen(text: str) -> dict:
 
 
 def is_valid_receiver(parsed: dict) -> bool:
-    """A screen is a real receiver if we found its MAC or radio address."""
+    """A real receiver: it has its own MAC/radio, OR it reports nodes.
+
+    Some receivers show their own properties as "unknown" while still relaying a
+    full node table — those are valid receivers (we backfill their MAC from the
+    arp-scan result upstream).
+    """
     r = parsed.get("receiver", {})
-    return bool(r.get("mac_address") or r.get("radio_address"))
+    return bool(r.get("mac_address") or r.get("radio_address") or parsed.get("nodes"))
+
+
+def looks_like_receiver(text: str) -> bool:
+    """Structural check: is this the receiver_cli screen at all, even if every
+    field is still blank/unknown? Used to decide whether to keep waiting for the
+    node table to paint vs. give up on a non-receiver host.
+    """
+    return "Receiver Properties" in text or "Node Properties" in text

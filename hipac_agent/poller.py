@@ -6,6 +6,7 @@ wakes early if the web UI requests an immediate scan ("Scan now").
 
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 from . import config, parser, pusher, scanner
@@ -77,17 +78,18 @@ class Poller(threading.Thread):
                 ip = dev["ip"]
                 self.status["current_ip"] = ip
                 cli_wait = int(cfg.get("cli_wait_seconds", 15))
-                max_wait = max(int(cfg.get("cli_max_wait_seconds", 35)), cli_wait)
+                max_wait = max(int(cfg.get("cli_max_wait_seconds", 45)), cli_wait)
+                t0 = time.monotonic()
                 try:
                     screen = capture_receiver_cli(
                         host=ip,
                         user=cfg["ssh_user"],
                         key_path=cfg["ssh_key_path"],
                         command=cfg["cli_command"],
-                        min_wait=min(int(cfg.get("cli_min_wait_seconds", 5)), max_wait),
+                        min_wait=min(int(cfg.get("cli_min_wait_seconds", 10)), max_wait),
                         max_wait=max_wait,
-                        stable_seconds=int(cfg.get("cli_stable_seconds", 3)),
-                        header_seconds=int(cfg.get("cli_header_seconds", 12)),
+                        stable_seconds=int(cfg.get("cli_stable_seconds", 8)),
+                        header_seconds=int(cfg.get("cli_header_seconds", 15)),
                         connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
                         cols=int(cfg.get("term_cols", 200)),
                         rows=int(cfg.get("term_rows", 60)),
@@ -111,9 +113,19 @@ class Poller(threading.Thread):
                         log.info("no valid receiver data at %s (%d chars captured)", ip, len(screen))
                     continue
 
+                # Confirmed a receiver. Some report their own MAC/IP as "unknown";
+                # backfill from the arp-scan result so the sticky identity is stable.
+                recv = parsed.setdefault("receiver", {})
+                if not recv.get("mac_address") and dev.get("mac"):
+                    recv["mac_address"] = dev["mac"]
+                if not recv.get("ip_address"):
+                    recv["ip_address"] = ip
+
                 self.storage.save_result(parsed, screen, _now_iso(), ip)
                 found += 1
-                log.info("recorded receiver at %s (%d nodes)", ip, len(parsed["nodes"]))
+                dur = time.monotonic() - t0
+                capped = " (hit max_wait)" if dur >= max_wait - 0.5 else ""
+                log.info("recorded receiver at %s (%d nodes) in %.0fs%s", ip, len(parsed["nodes"]), dur, capped)
         finally:
             self.status.update(running=False, current_ip=None,
                                last_run=_now_iso(), last_found=found)

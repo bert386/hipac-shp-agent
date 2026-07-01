@@ -148,15 +148,16 @@ def capture_receiver_cli(
             if elapsed < min_wait:
                 continue
 
-            parsed = parser.parse_screen(render())
-            if not parser.is_valid_receiver(parsed):
-                # Header never rendered within the grace window -> not a receiver.
+            text = render()
+            if not parser.looks_like_receiver(text):
+                # Not the receiver_cli screen; give a grace window then bail
+                # (keeps non-receiver hosts from costing the full max_wait).
                 if not seen_valid and elapsed >= header_seconds:
                     break
                 continue
 
             seen_valid = True
-            nc = len(parsed["nodes"])
+            nc = len(parser.parse_nodes(text))
             if nc != node_count:
                 node_count = nc
                 node_stable_since = now

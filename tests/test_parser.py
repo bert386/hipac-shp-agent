@@ -9,6 +9,7 @@ from hipac_agent import parser, scanner  # noqa: E402
 
 SAMPLE = open(os.path.join(os.path.dirname(__file__), "sample_screen.txt"), encoding="utf-8").read()
 SAMPLE_ACS = open(os.path.join(os.path.dirname(__file__), "sample_screen_acs.txt"), encoding="utf-8").read()
+SAMPLE_UNKNOWN = open(os.path.join(os.path.dirname(__file__), "sample_screen_unknown.txt"), encoding="utf-8").read()
 
 
 def test_receiver_fields():
@@ -49,8 +50,22 @@ def test_real_hardware_acs_capture():
     assert nodes[4]["rssi_nr"] == "-43"
 
 
+def test_receiver_with_unknown_header_is_valid_via_nodes():
+    # A receiver reporting its own props as "unknown" but relaying 4 nodes.
+    parsed = parser.parse_screen(SAMPLE_UNKNOWN)
+    assert parser.looks_like_receiver(SAMPLE_UNKNOWN)
+    assert parser.is_valid_receiver(parsed)          # valid via its nodes
+    assert not parsed["receiver"].get("mac_address")  # header was "unknown"
+    nodes = parsed["nodes"]
+    assert len(nodes) == 4
+    assert nodes[0]["radio_address"] == "80:34:28:1c:90:a7"
+    assert nodes[3]["rssi_rn"] == "-59"
+
+
 def test_not_a_receiver():
-    assert not parser.is_valid_receiver(parser.parse_screen("bash: receiver_cli: not found"))
+    text = "bash: receiver_cli: not found"
+    assert not parser.is_valid_receiver(parser.parse_screen(text))
+    assert not parser.looks_like_receiver(text)
 
 
 def test_arp_parsing():
