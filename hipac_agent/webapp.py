@@ -8,6 +8,7 @@ trigger a scan on demand.
 import functools
 import hashlib
 import os
+import threading
 
 from flask import (
     Flask, redirect, render_template, request, session, url_for, flash,
@@ -63,6 +64,7 @@ def create_app() -> Flask:
             status=_poller.status,
             receivers=_storage.latest_per_receiver(),
             site_name=config.load().get("site_name"),
+            poll_interval=config.load().get("poll_interval_minutes"),
         )
 
     @app.route("/settings", methods=["GET", "POST"])
@@ -97,6 +99,15 @@ def create_app() -> Flask:
     def scan_now():
         _poller.trigger_now()
         flash("Scan triggered — results will appear shortly.")
+        return redirect(url_for("index"))
+
+    @app.route("/upload-now", methods=["POST"])
+    @login_required
+    def upload_now():
+        # Run in the background so the request returns immediately; the poller
+        # lock prevents overlap with an in-progress upload.
+        threading.Thread(target=_poller.upload_pending, daemon=True).start()
+        flash("Upload triggered — pending results are being sent.")
         return redirect(url_for("index"))
 
     return app

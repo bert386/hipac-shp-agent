@@ -25,6 +25,7 @@ class Poller(threading.Thread):
         self.storage = storage
         self._wake = threading.Event()   # set to trigger an immediate cycle
         self._stop = threading.Event()
+        self._upload_lock = threading.Lock()  # serialise auto + manual uploads
         self.status = {
             "running": False,
             "current_ip": None,
@@ -105,6 +106,17 @@ class Poller(threading.Thread):
         return self.status
 
     def upload_pending(self, cfg: dict | None = None) -> int:
+        # Only one upload at a time — a manual "Upload now" must not race the
+        # end-of-cycle upload and re-post the same readings.
+        if not self._upload_lock.acquire(blocking=False):
+            log.info("upload already in progress; skipping")
+            return 0
+        try:
+            return self._do_upload(cfg)
+        finally:
+            self._upload_lock.release()
+
+    def _do_upload(self, cfg: dict | None = None) -> int:
         cfg = cfg or config.load()
         pending = self.storage.unuploaded()
         self.status["pending_upload"] = len(pending)
