@@ -27,36 +27,38 @@ _RECEIVER_FIELDS = {
     "fw_version": re.compile(r"F/?W\s*Version\s*:\s*(v?[\w.]+)", re.I),
 }
 
-# Order of columns in the Node Properties table.
-_NODE_FIELDS = ["relay", "fw_ver", "radio_address", "batt", "heartbeat", "rssi_nr", "rssi_rn"]
-
-# Any vertical box-drawing glyph -> a plain pipe so we can split on columns.
-_VERTICALS = "│┃╎╏┆┇┊┋|"
-_ROW_LABEL = re.compile(r"^R\d+$")
-
-
-def _split_cells(line: str) -> list[str]:
-    normalised = line
-    for ch in _VERTICALS:
-        normalised = normalised.replace(ch, "|")
-    if "|" in normalised:
-        cells = [c.strip() for c in normalised.split("|")]
-    else:
-        # Fallback for plain-text output: split on runs of 2+ spaces.
-        cells = re.split(r"\s{2,}", normalised.strip())
-    return [c for c in cells if c != ""]
+# A single node row, matched by its field *content* rather than the column
+# separator. Real receivers draw the table with the VT100 line-drawing set, and
+# when the alternate charset isn't translated the vertical bar arrives as the
+# letter 'x'; the mock/sample uses Unicode │; ncurses' ASCII fallback uses |.
+# Matching relay → firmware → radio addr → battery → heartbeat → RSSI×2 with a
+# non-digit gap (\D+?) between fields sidesteps whatever the separator is.
+_NODE_ROW = re.compile(
+    r"R(?P<relay>\d+)\D+?"
+    r"(?P<fw_ver>v[\d.]+)\D+?"
+    r"(?P<radio_address>[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\D+?"
+    r"(?P<batt>\d+)\D+?"
+    r"(?P<heartbeat>\d{1,2}:\d{2}:\d{2})\D+?"
+    r"(?P<rssi_nr>-?\d+)\D+?"
+    r"(?P<rssi_rn>-?\d+)"
+)
 
 
 def parse_nodes(text: str) -> list[dict]:
     nodes = []
-    for raw in text.splitlines():
-        cells = _split_cells(raw)
-        if cells and _ROW_LABEL.match(cells[0]):
-            node = {
-                field: (cells[i].strip() if i < len(cells) else None)
-                for i, field in enumerate(_NODE_FIELDS)
-            }
-            nodes.append(node)
+    for line in text.splitlines():
+        m = _NODE_ROW.search(line)
+        if not m:
+            continue
+        nodes.append({
+            "relay": "R" + m.group("relay"),
+            "fw_ver": m.group("fw_ver"),
+            "radio_address": m.group("radio_address"),
+            "batt": m.group("batt"),
+            "heartbeat": m.group("heartbeat"),
+            "rssi_nr": m.group("rssi_nr"),
+            "rssi_rn": m.group("rssi_rn"),
+        })
     return nodes
 
 

@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from hipac_agent import parser, scanner  # noqa: E402
 
 SAMPLE = open(os.path.join(os.path.dirname(__file__), "sample_screen.txt"), encoding="utf-8").read()
+SAMPLE_ACS = open(os.path.join(os.path.dirname(__file__), "sample_screen_acs.txt"), encoding="utf-8").read()
 
 
 def test_receiver_fields():
@@ -29,6 +30,23 @@ def test_nodes():
     }
     assert nodes[2]["radio_address"] == "80:34:28:1b:c8:1a"
     assert nodes[1]["batt"] == "198"
+
+
+def test_real_hardware_acs_capture():
+    # VT100 line-drawing capture from a real receiver (vertical bar renders 'x').
+    parsed = parser.parse_screen(SAMPLE_ACS)
+    assert parsed["receiver"]["mac_address"] == "3c:18:a0:21:95:4e"
+    assert parsed["receiver"]["ip_address"] == "192.168.1.140"
+    assert parsed["receiver"]["fw_version"] == "v0.23.4"
+
+    nodes = parsed["nodes"]
+    assert len(nodes) == 7  # R1..R7; trailing blank row ignored
+    assert nodes[0] == {
+        "relay": "R1", "fw_ver": "v0.23.4", "radio_address": "80:34:28:1b:d4:5b",
+        "batt": "198", "heartbeat": "07:46:55", "rssi_nr": "-74", "rssi_rn": "-78",
+    }
+    assert nodes[6]["radio_address"] == "80:34:28:1c:2d:28"
+    assert nodes[4]["rssi_nr"] == "-43"
 
 
 def test_not_a_receiver():

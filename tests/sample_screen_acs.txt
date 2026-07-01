@@ -1,0 +1,22 @@
+lqk
+x Receiver Properties                                                          x
+tqu
+x Radio Add.:  3c:e0:64:0b:95:c2                                               x
+x IP Add.:     192.168.1.140                                                   x
+x MAC Add.:    3c:18:a0:21:95:4e                                               x
+x F/W Version: v0.23.4                                                         x
+mqj
+lqk
+x Node Properties                                                              x
+tqqqqqqwqwqwqqqqqqwqwqwqu
+x Relayx F/W Ver.    x Radio Address     x Batt.x Heartbeatx RSSI N-Rx RSSI R-Nx
+tqqqqqqnqnqnqqqqqqnqnqnqu
+x R1   x v0.23.4     x 80:34:28:1b:d4:5b x 198  x 07:46:55 x -74     x -78     x
+x R2   x v0.23.4     x 80:34:28:1d:30:8a x 198  x 07:46:51 x -58     x -61     x
+x R3   x v0.23.4     x 80:34:28:1c:10:41 x 199  x 07:46:58 x -67     x -69     x
+x R4   x v0.23.4     x 80:34:28:1d:1a:d8 x 199  x 07:46:56 x -49     x -54     x
+x R5   x v0.23.4     x 80:34:28:1c:0f:e4 x 198  x 07:46:59 x -43     x -47     x
+x R6   x v0.23.4     x 80:34:28:1b:d4:8f x 198  x 07:46:58 x -48     x -53     x
+x R7   x v0.23.4     x 80:34:28:1c:2d:28 x 198  x 07:46:57 x -62     x -65     x
+x      x             x                   x      x          x         x         x
+mqqqqqqvqvqvqqqqqqvqvqvqj
