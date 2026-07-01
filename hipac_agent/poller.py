@@ -76,13 +76,18 @@ class Poller(threading.Thread):
                     break
                 ip = dev["ip"]
                 self.status["current_ip"] = ip
+                cli_wait = int(cfg.get("cli_wait_seconds", 15))
+                max_wait = max(int(cfg.get("cli_max_wait_seconds", 35)), cli_wait)
                 try:
                     screen = capture_receiver_cli(
                         host=ip,
                         user=cfg["ssh_user"],
                         key_path=cfg["ssh_key_path"],
                         command=cfg["cli_command"],
-                        wait_seconds=int(cfg.get("cli_wait_seconds", 15)),
+                        min_wait=min(int(cfg.get("cli_min_wait_seconds", 5)), max_wait),
+                        max_wait=max_wait,
+                        stable_seconds=int(cfg.get("cli_stable_seconds", 3)),
+                        header_seconds=int(cfg.get("cli_header_seconds", 12)),
                         connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
                         cols=int(cfg.get("term_cols", 200)),
                         rows=int(cfg.get("term_rows", 60)),
@@ -100,6 +105,10 @@ class Poller(threading.Thread):
 
                 parsed = parser.parse_screen(screen)
                 if not parser.is_valid_receiver(parsed):
+                    if screen.strip():
+                        # SSH worked and something rendered, but no receiver data —
+                        # usually a non-receiver, or a receiver that didn't paint in time.
+                        log.info("no valid receiver data at %s (%d chars captured)", ip, len(screen))
                     continue
 
                 self.storage.save_result(parsed, screen, _now_iso(), ip)

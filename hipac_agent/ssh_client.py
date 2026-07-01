@@ -16,6 +16,8 @@ import time
 import paramiko
 import pyte
 
+from . import parser
+
 log = logging.getLogger("hipac.ssh")
 
 
@@ -92,12 +94,24 @@ def capture_receiver_cli(
     user: str,
     key_path: str,
     command: str,
-    wait_seconds: int = 15,
+    min_wait: int = 5,
+    max_wait: int = 35,
+    stable_seconds: int = 3,
+    header_seconds: int = 12,
     connect_timeout: int = 15,
     cols: int = 200,
     rows: int = 60,
 ) -> str:
-    """Return the rendered CLI screen as newline-joined text."""
+    """Capture the CLI screen, waiting until the node table has actually settled.
+
+    Adaptive timing instead of a fixed wait:
+      * wait at least ``min_wait`` before accepting anything,
+      * give up early (host isn't a receiver) if the Receiver header hasn't
+        rendered within ``header_seconds``,
+      * once a valid receiver + nodes are visible, return as soon as the node
+        count stops changing for ``stable_seconds`` (or the whole screen settles),
+      * never wait longer than ``max_wait``.
+    """
     transport = _authenticate(host, user, key_path, connect_timeout)
     try:
         chan = transport.open_session(timeout=connect_timeout)
@@ -108,17 +122,57 @@ def capture_receiver_cli(
 
         screen = pyte.Screen(cols, rows)
         stream = pyte.ByteStream(screen)
-
         chan.send(command + "\n")
 
-        deadline = time.time() + wait_seconds
-        while time.time() < deadline:
+        start = time.time()
+        seen_valid = False
+        node_count = -1
+        node_stable_since = start
+        last_text = None
+        text_stable_since = start
+
+        def render() -> str:
+            return "\n".join(line.rstrip() for line in screen.display).strip("\n")
+
+        while True:
             try:
                 data = chan.recv(65536)
                 if data:
                     stream.feed(data)
             except socket.timeout:
                 pass
+
+            elapsed = time.time() - start
+            if elapsed >= max_wait:
+                break
+
+            text = render()
+            now = time.time()
+            if text != last_text:
+                last_text = text
+                text_stable_since = now
+
+            if elapsed < min_wait:
+                continue
+
+            parsed = parser.parse_screen(text)
+            if not parser.is_valid_receiver(parsed):
+                if not seen_valid and elapsed >= header_seconds:
+                    break  # Receiver header never rendered — not a receiver.
+                continue
+
+            seen_valid = True
+            nc = len(parsed["nodes"])
+            if nc != node_count:
+                node_count = nc
+                node_stable_since = now
+
+            # Node table has rendered and settled...
+            if nc > 0 and (now - node_stable_since) >= stable_seconds:
+                break
+            # ...or the whole screen has settled (covers node-less receivers).
+            if (now - text_stable_since) >= stable_seconds:
+                break
 
         for keys in ("q", "\x03"):  # 'q', then Ctrl-C
             try:
@@ -127,7 +181,7 @@ def capture_receiver_cli(
             except OSError:
                 break
 
-        return "\n".join(line.rstrip() for line in screen.display).strip("\n")
+        return render()
     finally:
         transport.close()
 
