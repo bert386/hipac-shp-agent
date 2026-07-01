@@ -40,6 +40,8 @@ DEFAULTS = {
     "poll_interval_minutes": 60,
     "excluded_ips": [],
     "arp_scan_timeout": 120,
+    # How often to check the server for pending maintenance commands.
+    "command_poll_seconds": 60,
     # SSH into receivers
     "ssh_user": "root",
     "ssh_key_path": os.path.join(os.path.expanduser("~"), ".ssh", "receiver_private_key"),

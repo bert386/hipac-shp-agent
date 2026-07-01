@@ -88,3 +88,56 @@ def capture_receiver_cli(
         return "\n".join(line.rstrip() for line in screen.display).strip("\n")
     finally:
         client.close()
+
+
+def exec_receiver_command(
+    host: str,
+    user: str,
+    key_path: str,
+    command: str,
+    connect_timeout: int = 15,
+    exec_timeout: int = 30,
+    expect_disconnect: bool = False,
+) -> tuple[int, str, str]:
+    """Run a one-shot command over SSH; return ``(exit_code, stdout, stderr)``.
+
+    When ``expect_disconnect`` is True (reboot commands) a dropped connection or
+    a missing exit status (-1) is treated as success — the receiver is on its way
+    down, which is the desired outcome.
+
+    Raises :class:`ReceiverUnreachable` for connection/auth failures.
+    """
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=host,
+            username=user,
+            key_filename=key_path,
+            timeout=connect_timeout,
+            banner_timeout=connect_timeout,
+            auth_timeout=connect_timeout,
+            look_for_keys=False,
+            allow_agent=False,
+        )
+    except (paramiko.SSHException, socket.error, EOFError) as exc:
+        raise ReceiverUnreachable(f"{host}: {exc}") from exc
+
+    try:
+        stdin, stdout, stderr = client.exec_command(command, timeout=exec_timeout)
+        try:
+            code = stdout.channel.recv_exit_status()
+            out = stdout.read().decode("utf-8", "replace")
+            err = stderr.read().decode("utf-8", "replace")
+        except (socket.timeout, EOFError, paramiko.SSHException):
+            if expect_disconnect:
+                return 0, "(connection closed after command; assumed success)", ""
+            raise
+        if code == -1 and expect_disconnect:
+            return 0, out or "(rebooting)", err
+        return code, out, err
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass

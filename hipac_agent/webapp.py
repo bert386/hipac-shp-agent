@@ -15,11 +15,13 @@ from flask import (
 )
 
 from . import config
+from .commands import CommandRunner
 from .poller import Poller
 from .storage import Storage
 
 _storage = Storage()
 _poller = Poller(_storage)
+_command_runner = CommandRunner(_storage)
 
 
 def _check_password(supplied: str) -> bool:
@@ -131,6 +133,7 @@ def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = config.load()
     _poller.start()
+    _command_runner.start()
 
     app = create_app()
     try:
