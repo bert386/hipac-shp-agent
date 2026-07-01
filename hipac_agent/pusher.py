@@ -25,6 +25,8 @@ The server replies ``200`` with ``{"accepted": [<echoed client ids>]}``.
 
 import requests
 
+from . import tailscale
+
 
 class PushError(Exception):
     pass
@@ -42,7 +44,9 @@ def push(server_url: str, api_token: str, site_name: str, results: list[dict], t
         "Authorization": f"Bearer {api_token}",
         "Accept": "application/json",
     }
-    body = {"site_name": site_name, "results": results}
+    # Report our Tailscale identity so the server can auto-fill the site's
+    # remote-access details (no-op keys if Tailscale isn't up).
+    body = {"site_name": site_name, "results": results, **tailscale.local_identity()}
     try:
         resp = requests.post(url, json=body, headers=headers, timeout=timeout)
     except requests.RequestException as exc:
