@@ -1,21 +1,81 @@
 """SSH into a receiver, drive the interactive ``receiver_cli`` TUI, and capture
-its final rendered screen as clean text.
+its final rendered screen — plus run one-shot maintenance commands.
 
-The CLI is a full-screen curses-style app that keeps redrawing while data
-propagates (10-15s). We allocate a PTY, feed everything it emits into a ``pyte``
-terminal emulator, wait for the data to settle, then read the emulator's final
-display grid and send a quit sequence.
+Receivers differ in how they authenticate: some accept the ``none`` method (no
+credential required), others require the receiver private key. We authenticate
+like OpenSSH does — try ``none`` first, then fall back to publickey — so both
+kinds work. The CLI itself is a full-screen curses app that keeps redrawing
+while data propagates (10-20s); we feed its output into a ``pyte`` terminal
+emulator and read the final display.
 """
 
+import logging
 import socket
 import time
 
 import paramiko
 import pyte
 
+log = logging.getLogger("hipac.ssh")
+
 
 class ReceiverUnreachable(Exception):
-    """The host could not be reached / authenticated as a receiver."""
+    """Could not reach the host (refused / timeout / not SSH)."""
+
+
+class ReceiverAuthFailed(ReceiverUnreachable):
+    """SSH is open but every auth method we tried was rejected."""
+
+
+def _load_key(key_path: str):
+    """Load a private key of any supported type, or return None if unavailable."""
+    try:
+        return paramiko.PKey.from_path(key_path)
+    except Exception as exc:  # missing file, bad format, etc.
+        log.debug("could not load key %s: %s", key_path, exc)
+        return None
+
+
+def _authenticate(host: str, user: str, key_path: str, timeout: int) -> paramiko.Transport:
+    """Open an authenticated Transport, trying 'none' then publickey.
+
+    Raises :class:`ReceiverUnreachable` if the host can't be reached and
+    :class:`ReceiverAuthFailed` if SSH is open but auth is rejected.
+    """
+    try:
+        sock = socket.create_connection((host, 22), timeout=timeout)
+    except OSError as exc:
+        raise ReceiverUnreachable(f"{host}: {exc}") from exc
+
+    transport = paramiko.Transport(sock)
+    try:
+        transport.start_client(timeout=timeout)
+    except (paramiko.SSHException, EOFError) as exc:
+        transport.close()
+        raise ReceiverUnreachable(f"{host}: SSH handshake failed ({exc})") from exc
+
+    # 1) 'none' — receivers with open SSH (no credential required).
+    try:
+        transport.auth_none(user)
+        if transport.is_authenticated():
+            return transport
+    except paramiko.BadAuthenticationType:
+        pass  # server wants a real method; fall through to publickey
+    except paramiko.SSHException:
+        pass
+
+    # 2) publickey with the configured key (receivers that require it).
+    key = _load_key(key_path)
+    if key is not None:
+        try:
+            transport.auth_publickey(user, key)
+            if transport.is_authenticated():
+                return transport
+        except paramiko.SSHException:
+            pass
+
+    transport.close()
+    raise ReceiverAuthFailed(f"{host}: authentication rejected (tried none + publickey)")
 
 
 def _drain(chan, seconds: float = 0.5) -> None:
@@ -37,29 +97,12 @@ def capture_receiver_cli(
     cols: int = 200,
     rows: int = 60,
 ) -> str:
-    """Return the rendered CLI screen as newline-joined text.
-
-    Raises :class:`ReceiverUnreachable` for connection/auth failures so the
-    poller can simply skip non-receiver hosts.
-    """
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    """Return the rendered CLI screen as newline-joined text."""
+    transport = _authenticate(host, user, key_path, connect_timeout)
     try:
-        client.connect(
-            hostname=host,
-            username=user,
-            key_filename=key_path,
-            timeout=connect_timeout,
-            banner_timeout=connect_timeout,
-            auth_timeout=connect_timeout,
-            look_for_keys=False,
-            allow_agent=False,
-        )
-    except (paramiko.SSHException, socket.error, EOFError) as exc:
-        raise ReceiverUnreachable(f"{host}: {exc}") from exc
-
-    try:
-        chan = client.invoke_shell(term="xterm", width=cols, height=rows)
+        chan = transport.open_session(timeout=connect_timeout)
+        chan.get_pty(term="xterm", width=cols, height=rows)
+        chan.invoke_shell()
         chan.settimeout(1.0)
         _drain(chan, 0.6)  # swallow login banner / prompt
 
@@ -77,7 +120,6 @@ def capture_receiver_cli(
             except socket.timeout:
                 pass
 
-        # Best-effort clean exit from the TUI.
         for keys in ("q", "\x03"):  # 'q', then Ctrl-C
             try:
                 chan.send(keys)
@@ -87,7 +129,7 @@ def capture_receiver_cli(
 
         return "\n".join(line.rstrip() for line in screen.display).strip("\n")
     finally:
-        client.close()
+        transport.close()
 
 
 def exec_receiver_command(
@@ -101,60 +143,37 @@ def exec_receiver_command(
 ) -> tuple[int, str, str]:
     """Run a one-shot command over SSH; return ``(exit_code, stdout, stderr)``.
 
-    When ``expect_disconnect`` is True (reboot commands) a dropped connection or
-    a missing exit status (-1) is treated as success — the receiver is on its way
-    down, which is the desired outcome.
-
-    Raises :class:`ReceiverUnreachable` for connection/auth failures.
+    When ``expect_disconnect`` is True (reboot), a dropped connection or missing
+    exit status is treated as success.
     """
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    transport = _authenticate(host, user, key_path, connect_timeout)
     try:
-        client.connect(
-            hostname=host,
-            username=user,
-            key_filename=key_path,
-            timeout=connect_timeout,
-            banner_timeout=connect_timeout,
-            auth_timeout=connect_timeout,
-            look_for_keys=False,
-            allow_agent=False,
-        )
-    except (paramiko.SSHException, socket.error, EOFError) as exc:
-        raise ReceiverUnreachable(f"{host}: {exc}") from exc
-
-    try:
-        stdin, stdout, stderr = client.exec_command(command, timeout=exec_timeout)
-        chan = stdout.channel
+        chan = transport.open_session(timeout=connect_timeout)
+        chan.settimeout(exec_timeout)
+        chan.exec_command(command)
 
         if expect_disconnect:
-            # The receiver is about to reboot. Never block on a dying socket:
-            # wait briefly for an exit status, otherwise assume the reboot took
-            # the connection down — which is success.
             deadline = time.time() + 5
             while time.time() < deadline and not chan.exit_status_ready():
                 time.sleep(0.2)
             if chan.exit_status_ready():
-                return chan.recv_exit_status(), _safe_read(stdout), _safe_read(stderr)
+                return chan.recv_exit_status(), _read(chan.makefile("rb")), _read(chan.makefile_stderr("rb"))
             return 0, "(reboot issued; connection dropping)", ""
 
-        chan.settimeout(exec_timeout)
         try:
-            out = _safe_read(stdout)
-            err = _safe_read(stderr)
+            out = _read(chan.makefile("rb"))
+            err = _read(chan.makefile_stderr("rb"))
             code = chan.recv_exit_status()
         except (socket.timeout, EOFError, paramiko.SSHException) as exc:
             raise ReceiverUnreachable(f"{host}: {exc}") from exc
         return code, out, err
     finally:
-        try:
-            client.close()
-        except Exception:
-            pass
+        transport.close()
 
 
-def _safe_read(stream) -> str:
+def _read(stream) -> str:
     try:
-        return stream.read().decode("utf-8", "replace")
+        data = stream.read()
     except Exception:
         return ""
+    return data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else str(data)

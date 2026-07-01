@@ -9,7 +9,7 @@ import threading
 from datetime import datetime, timezone
 
 from . import config, parser, pusher, scanner
-from .ssh_client import ReceiverUnreachable, capture_receiver_cli
+from .ssh_client import ReceiverAuthFailed, ReceiverUnreachable, capture_receiver_cli
 from .storage import Storage
 
 log = logging.getLogger("hipac.poller")
@@ -87,8 +87,13 @@ class Poller(threading.Thread):
                         cols=int(cfg.get("term_cols", 200)),
                         rows=int(cfg.get("term_rows", 60)),
                     )
+                except ReceiverAuthFailed as exc:
+                    # SSH is open but every method was rejected — likely a real
+                    # receiver with a credential mismatch. Surface it.
+                    log.warning("auth rejected at %s: %s", ip, exc)
+                    continue
                 except ReceiverUnreachable:
-                    continue  # not a receiver / can't auth -> skip quietly
+                    continue  # not a receiver / refused / timeout -> skip quietly
                 except Exception as exc:
                     log.warning("capture failed for %s: %s", ip, exc)
                     continue
