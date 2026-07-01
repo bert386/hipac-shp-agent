@@ -9,8 +9,10 @@ while data propagates (10-20s); we feed its output into a ``pyte`` terminal
 emulator and read the final display.
 """
 
+import contextlib
 import logging
 import socket
+import threading
 import time
 
 import paramiko
@@ -19,6 +21,20 @@ import pyte
 from . import parser
 
 log = logging.getLogger("hipac.ssh")
+
+
+@contextlib.contextmanager
+def _abort_after(transport, seconds: float):
+    """Force ``transport`` closed after ``seconds`` — bounds SSH steps that
+    otherwise have no timeout (auth, pty/shell requests), so a host that stalls
+    can't hang the whole poll cycle. Any in-progress call then raises."""
+    timer = threading.Timer(seconds, transport.close)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
 
 
 class ReceiverUnreachable(Exception):
@@ -51,30 +67,29 @@ def _authenticate(host: str, user: str, key_path: str, timeout: int) -> paramiko
 
     transport = paramiko.Transport(sock)
     try:
-        transport.start_client(timeout=timeout)
-    except (paramiko.SSHException, EOFError) as exc:
-        transport.close()
-        raise ReceiverUnreachable(f"{host}: SSH handshake failed ({exc})") from exc
+        with _abort_after(transport, timeout * 2):
+            transport.start_client(timeout=timeout)
 
-    # 1) 'none' — receivers with open SSH (no credential required).
-    try:
-        transport.auth_none(user)
-        if transport.is_authenticated():
-            return transport
-    except paramiko.BadAuthenticationType:
-        pass  # server wants a real method; fall through to publickey
-    except paramiko.SSHException:
-        pass
-
-    # 2) publickey with the configured key (receivers that require it).
-    key = _load_key(key_path)
-    if key is not None:
-        try:
-            transport.auth_publickey(user, key)
+            # 1) 'none' — receivers with open SSH (no credential required).
+            try:
+                transport.auth_none(user)
+            except (paramiko.BadAuthenticationType, paramiko.SSHException):
+                pass  # server wants a real method; fall through to publickey
             if transport.is_authenticated():
                 return transport
-        except paramiko.SSHException:
-            pass
+
+            # 2) publickey with the configured key (receivers that require it).
+            key = _load_key(key_path)
+            if key is not None:
+                try:
+                    transport.auth_publickey(user, key)
+                except paramiko.SSHException:
+                    pass
+            if transport.is_authenticated():
+                return transport
+    except (paramiko.SSHException, EOFError, OSError) as exc:
+        transport.close()
+        raise ReceiverUnreachable(f"{host}: handshake/auth failed ({exc})") from exc
 
     transport.close()
     raise ReceiverAuthFailed(f"{host}: authentication rejected (tried none + publickey)")
@@ -114,6 +129,11 @@ def capture_receiver_cli(
       * never wait longer than ``max_wait``.
     """
     transport = _authenticate(host, user, key_path, connect_timeout)
+    # Backstop: force-close if any step wedges (the loop self-bounds at max_wait,
+    # but open_session/get_pty/invoke_shell have no timeout of their own).
+    guard = threading.Timer(max_wait + connect_timeout + 10, transport.close)
+    guard.daemon = True
+    guard.start()
     try:
         chan = transport.open_session(timeout=connect_timeout)
         chan.get_pty(term="xterm", width=cols, height=rows)
@@ -176,6 +196,7 @@ def capture_receiver_cli(
 
         return render()
     finally:
+        guard.cancel()
         transport.close()
 
 
@@ -194,6 +215,9 @@ def exec_receiver_command(
     exit status is treated as success.
     """
     transport = _authenticate(host, user, key_path, connect_timeout)
+    guard = threading.Timer(exec_timeout + connect_timeout + 10, transport.close)
+    guard.daemon = True
+    guard.start()
     try:
         chan = transport.open_session(timeout=connect_timeout)
         chan.settimeout(exec_timeout)
@@ -215,6 +239,7 @@ def exec_receiver_command(
             raise ReceiverUnreachable(f"{host}: {exc}") from exc
         return code, out, err
     finally:
+        guard.cancel()
         transport.close()
 
 
