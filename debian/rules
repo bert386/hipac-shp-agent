@@ -1,0 +1,6 @@
+#!/usr/bin/make -f
+# Pure-Python package: dh copies files via .install, installs the systemd unit,
+# and runs our maintainer scripts. No build step required.
+
+%:
+	dh $@

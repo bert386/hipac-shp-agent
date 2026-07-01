@@ -1,0 +1,16 @@
+[Unit]
+Description=HiPAC-SHP receiver polling agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP_USER__
+Environment=HIPAC_DATA_DIR=__DATA_DIR__
+WorkingDirectory=__APP_DIR__
+ExecStart=__APP_DIR__/venv/bin/python -m hipac_agent
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

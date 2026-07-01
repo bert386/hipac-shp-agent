@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Status</h2>
+  <div class="grid2">
+    <div>
+      <p class="muted">Poller:
+        {% if status.running %}<span class="pill warn">scanning{% if status.current_ip %} {{ status.current_ip }}{% endif %}</span>
+        {% else %}<span class="pill ok">idle</span>{% endif %}
+      </p>
+      <p class="muted">Last run: {{ status.last_run or "never" }}</p>
+      <p class="muted">Receivers found last run: {{ status.last_found }}</p>
+    </div>
+    <div>
+      <p class="muted">Pending upload: {{ status.pending_upload }}</p>
+      {% if status.last_error %}<p class="muted">Last error: {{ status.last_error }}</p>{% endif %}
+      <form method="post" action="{{ url_for('scan_now') }}" style="margin-top:8px;">
+        <button type="submit">Scan now</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% for r in receivers %}
+<div class="card">
+  <h2>Receiver {{ r.receiver.mac_address or r.source_ip }}</h2>
+  <div class="grid2">
+    <p class="muted">IP: {{ r.receiver.ip_address or r.source_ip }}</p>
+    <p class="muted">Radio: {{ r.receiver.radio_address or "—" }}</p>
+    <p class="muted">MAC: {{ r.receiver.mac_address or "—" }}</p>
+    <p class="muted">F/W: {{ r.receiver.fw_version or "—" }}</p>
+  </div>
+  {% if r.nodes %}
+  <table style="margin-top:10px;">
+    <thead><tr>
+      <th>Relay</th><th>F/W</th><th>Radio Address</th><th>Batt.</th>
+      <th>Heartbeat</th><th>RSSI N-R</th><th>RSSI R-N</th>
+    </tr></thead>
+    <tbody>
+      {% for n in r.nodes %}
+      <tr>
+        <td>{{ n.relay }}</td><td>{{ n.fw_ver }}</td><td>{{ n.radio_address }}</td>
+        <td>{{ n.batt }}</td><td>{{ n.heartbeat }}</td><td>{{ n.rssi_nr }}</td><td>{{ n.rssi_rn }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <p class="muted" style="margin-top:8px;">Polled: {{ r.polled_at }}</p>
+</div>
+{% else %}
+<div class="card"><p class="muted">No receivers recorded yet. Run a scan to begin.</p></div>
+{% endfor %}
+{% endblock %}

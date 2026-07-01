@@ -1,0 +1,27 @@
+Source: hipac-shp-agent
+Section: net
+Priority: optional
+Maintainer: Eastec <encrypted.files.aus@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: hipac-shp-agent
+Architecture: all
+Depends: ${misc:Depends},
+ python3,
+ python3-paramiko,
+ python3-pyte,
+ python3-flask,
+ python3-requests,
+ python3-waitress,
+ arp-scan,
+ adduser,
+ sudo
+Description: HiPAC-SHP receiver polling agent
+ Scans the local network with arp-scan, logs into HiPAC receivers over SSH,
+ captures the receiver_cli TUI screen and reports receiver/node readings to the
+ central HiPAC-SHP dashboard.
+ .
+ Includes a local, password-protected web UI (port 8080) for setting the site
+ name, polling interval, excluded IPs, server URL/token and SSH details.

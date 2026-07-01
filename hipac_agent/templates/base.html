@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HiPAC-SHP Agent{% if site_name %} — {{ site_name }}{% endif %}</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           margin: 0; background: #0f1115; color: #e6e6e6; }
+    header { background: #171a21; padding: 14px 20px; border-bottom: 1px solid #262b36;
+             display: flex; align-items: center; gap: 16px; }
+    header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+    header nav a { color: #9db2d6; margin-left: 14px; text-decoration: none; font-size: 14px; }
+    header nav a:hover { color: #fff; }
+    main { max-width: 960px; margin: 24px auto; padding: 0 20px; }
+    .card { background: #171a21; border: 1px solid #262b36; border-radius: 10px;
+            padding: 18px 20px; margin-bottom: 20px; }
+    h2 { font-size: 15px; margin: 0 0 14px; color: #cfe0ff; text-transform: uppercase; letter-spacing: .04em; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #262b36; }
+    th { color: #8ea2c4; font-weight: 600; }
+    label { display: block; font-size: 13px; color: #9db2d6; margin: 12px 0 4px; }
+    input, textarea { width: 100%; padding: 8px 10px; background: #0f1115; color: #e6e6e6;
+            border: 1px solid #333a48; border-radius: 6px; font-size: 14px; }
+    textarea { min-height: 80px; font-family: ui-monospace, monospace; }
+    button, .btn { background: #2b6cff; color: #fff; border: 0; padding: 9px 16px;
+            border-radius: 6px; font-size: 14px; cursor: pointer; }
+    button.secondary { background: #333a48; }
+    .flash { background: #1d3a1d; border: 1px solid #2e5c2e; color: #b6f0b6;
+            padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+    .muted { color: #7f8ba0; font-size: 13px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .ok { background: #14361f; color: #7fe0a0; }
+    .warn { background: #3a2f14; color: #e0c77f; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>HiPAC-SHP{% if site_name %} · {{ site_name }}{% endif %}</h1>
+    <nav>
+      <a href="{{ url_for('index') }}">Dashboard</a>
+      <a href="{{ url_for('settings') }}">Settings</a>
+      <a href="{{ url_for('logout') }}">Log out</a>
+    </nav>
+  </header>
+  <main>
+    {% with messages = get_flashed_messages() %}
+      {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+    {% endwith %}
+    {% block body %}{% endblock %}
+  </main>
+</body>
+</html>

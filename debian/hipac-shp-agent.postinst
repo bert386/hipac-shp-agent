@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  configure)
+    # Dedicated system user to run the agent.
+    if ! getent passwd hipac >/dev/null; then
+      adduser --system --group --home /var/lib/hipac --no-create-home hipac
+    fi
+    mkdir -p /var/lib/hipac/data /var/lib/hipac/.ssh
+    chown -R hipac:hipac /var/lib/hipac
+    chmod 700 /var/lib/hipac/.ssh
+
+    # Let the agent run arp-scan without a password prompt.
+    cat > /etc/sudoers.d/hipac-arpscan <<'EOF'
+hipac ALL=(root) NOPASSWD: /usr/sbin/arp-scan, /usr/bin/arp-scan
+EOF
+    chmod 440 /etc/sudoers.d/hipac-arpscan
+
+    echo "HiPAC-SHP agent installed. Next steps:"
+    echo "  1. Copy the receiver key to /var/lib/hipac/.ssh/receiver_private_key"
+    echo "     then: chown hipac:hipac ...; chmod 600 ..."
+    echo "  2. Open http://<this-host>:8080 (default password 'changeme') and configure."
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

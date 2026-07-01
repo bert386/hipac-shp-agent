@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block body %}
+<form method="post">
+  <div class="card">
+    <h2>Site &amp; reporting</h2>
+    <label for="site_name">Site name</label>
+    <input id="site_name" name="site_name" value="{{ cfg.site_name }}">
+    <label for="server_url">Central server URL</label>
+    <input id="server_url" name="server_url" value="{{ cfg.server_url }}">
+    <label for="api_token">API token (per-site)</label>
+    <input id="api_token" name="api_token" value="{{ cfg.api_token }}">
+  </div>
+
+  <div class="card">
+    <h2>Scanning</h2>
+    <div class="grid2">
+      <div><label for="interface">Interface</label>
+        <input id="interface" name="interface" value="{{ cfg.interface }}"></div>
+      <div><label for="subnet">Subnet</label>
+        <input id="subnet" name="subnet" value="{{ cfg.subnet }}"></div>
+    </div>
+    <label for="poll_interval_minutes">Polling interval (minutes)</label>
+    <input id="poll_interval_minutes" name="poll_interval_minutes" type="number" min="1" value="{{ cfg.poll_interval_minutes }}">
+    <label for="excluded_ips">Excluded IPs (one per line)</label>
+    <textarea id="excluded_ips" name="excluded_ips">{{ cfg.excluded_ips | join('\n') }}</textarea>
+  </div>
+
+  <div class="card">
+    <h2>Receiver SSH</h2>
+    <div class="grid2">
+      <div><label for="ssh_user">SSH user</label>
+        <input id="ssh_user" name="ssh_user" value="{{ cfg.ssh_user }}"></div>
+      <div><label for="cli_wait_seconds">CLI wait (seconds)</label>
+        <input id="cli_wait_seconds" name="cli_wait_seconds" type="number" min="1" value="{{ cfg.cli_wait_seconds }}"></div>
+    </div>
+    <label for="ssh_key_path">SSH private key path</label>
+    <input id="ssh_key_path" name="ssh_key_path" value="{{ cfg.ssh_key_path }}">
+    <label for="cli_command">CLI command</label>
+    <input id="cli_command" name="cli_command" value="{{ cfg.cli_command }}">
+  </div>
+
+  <div class="card">
+    <h2>Security</h2>
+    <label for="config_password">New config password (leave blank to keep current)</label>
+    <input id="config_password" name="config_password" type="password" placeholder="••••••••">
+  </div>
+
+  <button type="submit">Save settings</button>
+</form>
+{% endblock %}

@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: hipac-shp-agent
+
+Files: *
+Copyright: 2026 Eastec
+License: proprietary
+ All rights reserved.

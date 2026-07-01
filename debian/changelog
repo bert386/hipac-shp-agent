@@ -1,0 +1,6 @@
+hipac-shp-agent (0.1.0) unstable; urgency=medium
+
+  * Initial release: arp-scan discovery, SSH/receiver_cli TUI capture,
+    local configuration web UI, and upload to the central HiPAC-SHP server.
+
+ -- Eastec <encrypted.files.aus@gmail.com>  Wed, 01 Jul 2026 00:00:00 +0000
