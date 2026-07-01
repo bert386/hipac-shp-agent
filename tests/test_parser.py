@@ -62,6 +62,17 @@ def test_receiver_with_unknown_header_is_valid_via_nodes():
     assert nodes[3]["rssi_rn"] == "-59"
 
 
+def test_header_ready():
+    # Real radio address in the header -> ready.
+    assert parser.header_ready(SAMPLE)
+    assert parser.header_ready(SAMPLE_ACS)
+    # Header still shows "unknown" (loading) -> NOT ready; keep waiting.
+    assert not parser.header_ready(SAMPLE_UNKNOWN)
+    # Blank / no header -> not ready.
+    assert not parser.header_ready("x Radio Add.:                                 x")
+    assert not parser.header_ready("nothing here")
+
+
 def test_not_a_receiver():
     text = "bash: receiver_cli: not found"
     assert not parser.is_valid_receiver(parser.parse_screen(text))

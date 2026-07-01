@@ -51,9 +51,9 @@ DEFAULTS = {
     # Adaptive capture: wait until the node table settles rather than a fixed time.
     "cli_wait_seconds": 15,          # legacy floor; also the minimum for max_wait
     "cli_min_wait_seconds": 10,      # never accept a screen before this
-    "cli_max_wait_seconds": 45,      # hard cap per receiver
+    "cli_max_wait_seconds": 60,      # hard cap per receiver (header can be slow)
     "cli_stable_seconds": 8,         # node count unchanged this long => settled
-    "cli_header_seconds": 15,        # no Receiver header by now => not a receiver
+    "cli_header_seconds": 15,        # no Receiver-CLI screen by now => not a receiver
     "term_cols": 200,
     "term_rows": 60,
     # Local web UI

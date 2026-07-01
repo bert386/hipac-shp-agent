@@ -31,8 +31,9 @@ def build_command(action: str, params: dict | None) -> tuple[str, bool]:
         return "sync && reboot", True
 
     if action == "delete_log":
-        # Fixed path only — never a caller-supplied path.
-        return "rm -f /persistent/log/log.dat", False
+        # Fixed path only — never a caller-supplied path. Reboot after so the
+        # receiver releases the (now-unlinked) file and reclaims the space.
+        return "rm -f /persistent/log/log.dat && sync && reboot", True
 
     if action == "set_date":
         dt = str(params.get("datetime", ""))

@@ -182,9 +182,12 @@ def capture_receiver_cli(
                 node_count = nc
                 node_stable_since = now
 
-            # Done once the node list stops growing. A receiver still showing 0
-            # nodes keeps waiting (up to max_wait) — nodes paint after the header.
-            if nc > 0 and (now - node_stable_since) >= stable_seconds:
+            # Complete only when the node list has settled AND the header has
+            # loaded its real values (Radio Add. no longer "unknown"). The header
+            # paints last, so stopping at node-settle alone loses the radio addr.
+            # Receivers whose header never resolves fall through to max_wait.
+            nodes_settled = (now - node_stable_since) >= stable_seconds
+            if nodes_settled and parser.header_ready(text):
                 break
 
         for keys in ("q", "\x03"):  # 'q', then Ctrl-C

@@ -12,10 +12,10 @@ def test_reboot():
     assert build_command("reboot", {}) == ("sync && reboot", True)
 
 
-def test_delete_log_is_fixed_path():
+def test_delete_log_is_fixed_path_and_reboots():
     cmd, disconnect = build_command("delete_log", {"path": "/etc/passwd"})
-    assert cmd == "rm -f /persistent/log/log.dat"   # caller path ignored
-    assert disconnect is False
+    assert cmd == "rm -f /persistent/log/log.dat && sync && reboot"   # caller path ignored
+    assert disconnect is True   # reboots to release the file
 
 
 def test_set_date_valid():

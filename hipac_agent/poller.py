@@ -90,7 +90,7 @@ class Poller(threading.Thread):
                 self.status["current_ip"] = ip
                 log.info("scanning %s", ip)
                 cli_wait = int(cfg.get("cli_wait_seconds", 15))
-                max_wait = max(int(cfg.get("cli_max_wait_seconds", 45)), cli_wait)
+                max_wait = max(int(cfg.get("cli_max_wait_seconds", 60)), cli_wait)
                 t0 = time.monotonic()
                 try:
                     screen = capture_receiver_cli(

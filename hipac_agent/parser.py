@@ -89,3 +89,16 @@ def looks_like_receiver(text: str) -> bool:
     node table to paint vs. give up on a non-receiver host.
     """
     return "Receiver Properties" in text or "Node Properties" in text
+
+
+# The Receiver Properties header paints LAST (after the node table) and can be
+# slow. While loading, its fields read "unknown"; it's only "ready" once the
+# Radio Add. shows a real address.
+_RADIO_READY = re.compile(r"Radio\s*Add\.?\s*:\s*(" + _MAC + r")", re.I)
+
+
+def header_ready(text: str) -> bool:
+    """True once the receiver's header has finished loading — the Radio Add.
+    field shows a real address rather than "unknown"/blank. The header paints
+    last and can be slow, so this signals the whole screen is fully rendered."""
+    return bool(_RADIO_READY.search(text))
