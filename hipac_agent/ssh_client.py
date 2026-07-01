@@ -108,8 +108,9 @@ def capture_receiver_cli(
       * wait at least ``min_wait`` before accepting anything,
       * give up early (host isn't a receiver) if the Receiver header hasn't
         rendered within ``header_seconds``,
-      * once a valid receiver + nodes are visible, return as soon as the node
-        count stops changing for ``stable_seconds`` (or the whole screen settles),
+      * return as soon as the node count stops growing for ``stable_seconds``
+        (receivers showing zero nodes wait the full ``max_wait``, since nodes
+        can take ~20s to paint after the header),
       * never wait longer than ``max_wait``.
     """
     transport = _authenticate(host, user, key_path, connect_timeout)
@@ -128,8 +129,6 @@ def capture_receiver_cli(
         seen_valid = False
         node_count = -1
         node_stable_since = start
-        last_text = None
-        text_stable_since = start
 
         def render() -> str:
             return "\n".join(line.rstrip() for line in screen.display).strip("\n")
@@ -142,23 +141,18 @@ def capture_receiver_cli(
             except socket.timeout:
                 pass
 
-            elapsed = time.time() - start
+            now = time.time()
+            elapsed = now - start
             if elapsed >= max_wait:
                 break
-
-            text = render()
-            now = time.time()
-            if text != last_text:
-                last_text = text
-                text_stable_since = now
-
             if elapsed < min_wait:
                 continue
 
-            parsed = parser.parse_screen(text)
+            parsed = parser.parse_screen(render())
             if not parser.is_valid_receiver(parsed):
+                # Header never rendered within the grace window -> not a receiver.
                 if not seen_valid and elapsed >= header_seconds:
-                    break  # Receiver header never rendered — not a receiver.
+                    break
                 continue
 
             seen_valid = True
@@ -167,11 +161,9 @@ def capture_receiver_cli(
                 node_count = nc
                 node_stable_since = now
 
-            # Node table has rendered and settled...
+            # Done once the node list stops growing. A receiver still showing 0
+            # nodes keeps waiting (up to max_wait) — nodes paint after the header.
             if nc > 0 and (now - node_stable_since) >= stable_seconds:
-                break
-            # ...or the whole screen has settled (covers node-less receivers).
-            if (now - text_stable_since) >= stable_seconds:
                 break
 
         for keys in ("q", "\x03"):  # 'q', then Ctrl-C
