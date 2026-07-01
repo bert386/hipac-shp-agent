@@ -1,21 +1,18 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="card">
-  <h2>Status</h2>
+  <h2>Status <span id="s-live" class="pill ok" style="font-size:11px; margin-left:6px;">live</span></h2>
   <div class="grid2">
     <div>
-      <p class="muted">Poller:
-        {% if status.running %}<span class="pill warn">scanning{% if status.current_ip %} {{ status.current_ip }}{% endif %}</span>
-        {% else %}<span class="pill ok">idle</span>{% endif %}
-      </p>
-      <p class="muted">Last run: {{ status.last_run or "never" }}</p>
-      <p class="muted">Receivers found last run: {{ status.last_found }}</p>
-      <p class="muted">Polling every {{ poll_interval }} min</p>
+      <p class="muted">Poller: <span id="s-state" class="pill ok">idle</span></p>
+      <p class="muted">Last run: <span id="s-lastrun">{{ status.last_run or "never" }}</span></p>
+      <p class="muted">Receivers found last run: <span id="s-found">{{ status.last_found }}</span></p>
+      <p class="muted">Polling every <span id="s-interval">{{ poll_interval }}</span> min</p>
     </div>
     <div>
-      <p class="muted">Pending upload: {{ status.pending_upload }}</p>
-      <p class="muted">Last upload: {{ status.last_upload or "never" }}{% if status.last_upload_count %} ({{ status.last_upload_count }} sent){% endif %}</p>
-      {% if status.last_error %}<p class="muted">Last error: {{ status.last_error }}</p>{% endif %}
+      <p class="muted">Pending upload: <span id="s-pending">{{ status.pending_upload }}</span></p>
+      <p class="muted">Last upload: <span id="s-lastupload">{{ status.last_upload or "never" }}{% if status.last_upload_count %} ({{ status.last_upload_count }} sent){% endif %}</span></p>
+      <p class="muted" id="s-error-wrap" style="{{ '' if status.last_error else 'display:none;' }}">Last error: <span id="s-error">{{ status.last_error }}</span></p>
       <div style="display:flex; gap:8px; margin-top:8px;">
         <form method="post" action="{{ url_for('scan_now') }}">
           <button type="submit">Scan now</button>
@@ -58,4 +55,52 @@
 {% else %}
 <div class="card"><p class="muted">No receivers recorded yet. Run a scan to begin.</p></div>
 {% endfor %}
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let wasRunning = {{ 'true' if status.running else 'false' }};
+
+  async function poll() {
+    try {
+      const resp = await fetch("{{ url_for('status') }}", { cache: "no-store" });
+      if (!resp.ok) throw new Error(resp.status);
+      const s = await resp.json();
+
+      const state = $("s-state");
+      if (s.running) {
+        state.textContent = "scanning" + (s.current_ip ? " " + s.current_ip : "");
+        state.className = "pill warn";
+      } else {
+        state.textContent = "idle";
+        state.className = "pill ok";
+      }
+      $("s-lastrun").textContent = s.last_run || "never";
+      $("s-found").textContent = s.last_found;
+      $("s-interval").textContent = s.poll_interval_minutes;
+      $("s-pending").textContent = s.pending_upload;
+      $("s-lastupload").textContent = (s.last_upload || "never")
+        + (s.last_upload_count ? " (" + s.last_upload_count + " sent)" : "");
+      if (s.last_error) {
+        $("s-error").textContent = s.last_error;
+        $("s-error-wrap").style.display = "";
+      } else {
+        $("s-error-wrap").style.display = "none";
+      }
+      $("s-live").textContent = "live";
+      $("s-live").className = "pill ok";
+
+      // A scan just finished — reload once to show the newly captured receivers.
+      if (wasRunning && !s.running) { location.reload(); return; }
+      wasRunning = s.running;
+    } catch (e) {
+      $("s-live").textContent = "offline";
+      $("s-live").className = "pill warn";
+    }
+  }
+
+  poll();
+  setInterval(poll, 2000);
+})();
+</script>
 {% endblock %}
