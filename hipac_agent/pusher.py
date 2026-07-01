@@ -23,6 +23,8 @@ API contract (matched by the Laravel side):
 The server replies ``200`` with ``{"accepted": [<echoed client ids>]}``.
 """
 
+import socket
+
 import requests
 
 from . import tailscale
@@ -44,9 +46,14 @@ def push(server_url: str, api_token: str, site_name: str, results: list[dict], t
         "Authorization": f"Bearer {api_token}",
         "Accept": "application/json",
     }
-    # Report our Tailscale identity so the server can auto-fill the site's
-    # remote-access details (no-op keys if Tailscale isn't up).
-    body = {"site_name": site_name, "results": results, **tailscale.local_identity()}
+    # Report our OS hostname + Tailscale identity so the server can show/auto-fill
+    # the site's device details (Tailscale keys are no-ops if it isn't up).
+    body = {
+        "site_name": site_name,
+        "agent_hostname": socket.gethostname(),
+        "results": results,
+        **tailscale.local_identity(),
+    }
     try:
         resp = requests.post(url, json=body, headers=headers, timeout=timeout)
     except requests.RequestException as exc:
