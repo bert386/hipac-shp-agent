@@ -143,6 +143,15 @@ class Poller(threading.Thread):
                                last_run=_now_iso(), last_found=found)
 
         self.upload_pending(cfg)
+
+        # Keep the local DB bounded: trim old uploaded results per receiver.
+        try:
+            removed = self.storage.prune(int(cfg.get("results_keep_per_receiver", 200)))
+            if removed:
+                log.info("pruned %d old local results", removed)
+        except Exception:
+            log.exception("prune failed")
+
         return self.status
 
     def upload_pending(self, cfg: dict | None = None) -> int:

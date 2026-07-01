@@ -41,6 +41,7 @@ DEFAULTS = {
     "excluded_ips": [],
     "arp_scan_timeout": 120,
     "arp_scan_retries": 5,           # more retries = fewer missed hosts on flaky nets
+    "results_keep_per_receiver": 200,  # local DB: keep this many uploaded results/receiver
     # How often to check the server for pending maintenance commands.
     "command_poll_seconds": 60,
     # SSH into receivers

@@ -95,3 +95,25 @@ class Storage:
             return self._conn.execute(
                 "SELECT COUNT(*) AS c FROM results WHERE uploaded = 0"
             ).fetchone()["c"]
+
+    def prune(self, keep_per_receiver: int = 200) -> int:
+        """Delete old *uploaded* results, keeping the newest ``keep_per_receiver``
+        per receiver (the latest is needed for the known-receiver backstop, and
+        never delete anything still pending upload). Returns rows deleted."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, uploaded, COALESCE(receiver_mac, receiver_ip) AS k "
+                "FROM results ORDER BY id DESC"
+            ).fetchall()
+            seen: dict = {}
+            to_delete = []
+            for r in rows:
+                key = r["k"]
+                count = seen.get(key, 0) + 1
+                seen[key] = count
+                if count > keep_per_receiver and r["uploaded"]:
+                    to_delete.append((r["id"],))
+            if to_delete:
+                self._conn.executemany("DELETE FROM results WHERE id = ?", to_delete)
+                self._conn.commit()
+            return len(to_delete)
