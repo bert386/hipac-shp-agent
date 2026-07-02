@@ -27,7 +27,7 @@ import socket
 
 import requests
 
-from . import tailscale
+from . import device, tailscale
 
 
 class PushError(Exception):
@@ -51,6 +51,7 @@ def push(server_url: str, api_token: str, site_name: str, results: list[dict], t
     body = {
         "site_name": site_name,
         "agent_hostname": socket.gethostname(),
+        "agent": device.stats(),
         "results": results,
         **tailscale.local_identity(),
     }

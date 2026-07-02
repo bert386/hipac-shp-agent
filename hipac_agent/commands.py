@@ -7,6 +7,8 @@ POST the result back to /api/commands/{id}/result.
 """
 
 import logging
+import os
+import subprocess
 import threading
 
 import requests
@@ -23,9 +25,10 @@ def _auth(cfg: dict) -> dict:
 
 
 class CommandRunner(threading.Thread):
-    def __init__(self, storage):
+    def __init__(self, storage, poller=None):
         super().__init__(daemon=True)
         self.storage = storage
+        self.poller = poller       # for 'poll_now'
         self._stop = threading.Event()
 
     def stop(self) -> None:
@@ -58,6 +61,11 @@ class CommandRunner(threading.Thread):
         action = cmd.get("action")
         params = cmd.get("params") or {}
         receiver = cmd.get("receiver") or {}
+
+        # Site-level agent commands (poll_now, update_agent) have no receiver.
+        if not receiver:
+            self._handle_agent(cfg, cid, action)
+            return
 
         # Whatever happens below, the command must produce a reported result so
         # it never sits at "sent" forever.
@@ -99,6 +107,36 @@ class CommandRunner(threading.Thread):
         except Exception as exc:  # noqa: BLE001 - never let a command orphan
             log.exception("command %s crashed", cid)
             self._report(cfg, cid, "failed", error=str(exc)[:2000])
+
+    def _handle_agent(self, cfg: dict, cid, action: str) -> None:
+        """Handle site-level actions that target this Pi, not a receiver."""
+        try:
+            if action == "poll_now":
+                if self.poller:
+                    self.poller.trigger_now()
+                self._report(cfg, cid, "done", output="scan triggered")
+            elif action == "update_agent":
+                self._run_update(cfg, cid)
+            else:
+                self._report(cfg, cid, "failed", error=f"unknown agent action: {action}")
+        except Exception as exc:  # noqa: BLE001
+            log.exception("agent command %s crashed", cid)
+            self._report(cfg, cid, "failed", error=str(exc)[:2000])
+
+    def _run_update(self, cfg: dict, cid) -> None:
+        update_cmd = (cfg.get("agent_update_command") or "").strip()
+        if not update_cmd:
+            self._report(cfg, cid, "failed", error="agent_update_command not configured")
+            return
+        # Report BEFORE running — the update restarts this process, so we can't
+        # report afterwards. Run detached so it survives our own restart.
+        log.info("running agent self-update")
+        self._report(cfg, cid, "done", output="update started; agent will restart")
+        subprocess.Popen(
+            update_cmd, shell=True, start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cwd=os.path.expanduser("~"),
+        )
 
     def _resolve_ip(self, receiver: dict) -> str | None:
         """Prefer the current IP we last saw for this MAC over the server's."""

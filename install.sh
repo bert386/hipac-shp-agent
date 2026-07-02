@@ -16,16 +16,22 @@ echo "==> Deploying app to ${APP_DIR}"
 mkdir -p "${APP_DIR}"
 cp -r hipac_agent "${APP_DIR}/"
 cp requirements.txt "${APP_DIR}/"
+cp agent-deploy.sh "${APP_DIR}/"
 
 echo "==> Creating virtualenv"
 python3 -m venv "${APP_DIR}/venv"
 "${APP_DIR}/venv/bin/pip" install --upgrade pip
 "${APP_DIR}/venv/bin/pip" install -r "${APP_DIR}/requirements.txt"
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
+# The self-update helper is run as root via sudoers, so keep it root-owned and
+# not writable by the agent user (prevents privilege escalation).
+chown root:root "${APP_DIR}/agent-deploy.sh"
+chmod 755 "${APP_DIR}/agent-deploy.sh"
 
-echo "==> Allowing arp-scan without a password prompt (for the service user)"
-echo "${APP_USER} ALL=(root) NOPASSWD: /usr/sbin/arp-scan, /usr/bin/arp-scan" \
-  > /etc/sudoers.d/hipac-arpscan
+echo "==> Granting the service user narrow passwordless sudo"
+cat > /etc/sudoers.d/hipac-arpscan <<EOF
+${APP_USER} ALL=(root) NOPASSWD: /usr/sbin/arp-scan, /usr/bin/arp-scan, ${APP_DIR}/agent-deploy.sh
+EOF
 chmod 440 /etc/sudoers.d/hipac-arpscan
 
 echo "==> Fixing SSH key permissions (if present)"

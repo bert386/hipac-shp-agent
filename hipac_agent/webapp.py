@@ -21,7 +21,7 @@ from .storage import Storage
 
 _storage = Storage()
 _poller = Poller(_storage)
-_command_runner = CommandRunner(_storage)
+_command_runner = CommandRunner(_storage, _poller)
 
 
 def _check_password(supplied: str) -> bool:

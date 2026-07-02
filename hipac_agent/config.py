@@ -44,6 +44,9 @@ DEFAULTS = {
     "results_keep_per_receiver": 200,  # local DB: keep this many uploaded results/receiver
     # How often to check the server for pending maintenance commands.
     "command_poll_seconds": 60,
+    # Command run for the "Update agent" button (pull latest, redeploy, restart).
+    # Requires the sudoers entry from install.sh. Empty = disabled.
+    "agent_update_command": 'cd "$HOME/hipac-shp-agent" && git pull --ff-only && sudo /opt/hipac-agent/agent-deploy.sh',
     # SSH into receivers
     "ssh_user": "root",
     "ssh_key_path": os.path.join(os.path.expanduser("~"), ".ssh", "receiver_private_key"),
