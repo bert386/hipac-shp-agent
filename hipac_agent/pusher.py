@@ -34,9 +34,16 @@ class PushError(Exception):
     pass
 
 
-def push(server_url: str, api_token: str, site_name: str, results: list[dict], timeout: int = 30) -> list[int]:
-    """Send results; return the list of local ids the server accepted."""
-    if not results:
+def push(server_url: str, api_token: str, site_name: str, results: list[dict],
+         scan: dict | None = None, timeout: int = 30) -> list[int]:
+    """Send results (and optional scan progress); return accepted local ids.
+
+    ``scan`` carries live cycle progress ({active, total, done, current,
+    started_at, finished_at}). A progress-only ping (empty ``results`` with a
+    ``scan``) is allowed so the dashboard can advance the bar past skipped hosts
+    and mark the cycle complete.
+    """
+    if not results and scan is None:
         return []
     if not server_url or not api_token:
         raise PushError("server_url and api_token must be configured")
@@ -53,6 +60,7 @@ def push(server_url: str, api_token: str, site_name: str, results: list[dict], t
         "agent_hostname": socket.gethostname(),
         "agent": device.stats(),
         "results": results,
+        **({"scan": scan} if scan is not None else {}),
         **tailscale.local_identity(),
     }
     try:

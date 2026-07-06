@@ -36,6 +36,13 @@ class Poller(threading.Thread):
             "pending_upload": 0,
             "last_upload": None,
             "last_upload_count": 0,
+            # Live scan progress (also pushed to the server each upload).
+            "scan_active": False,
+            "scan_total": 0,
+            "scan_done": 0,
+            "scan_current": None,
+            "scan_started_at": None,
+            "scan_finished_at": None,
         }
 
     # -- control -----------------------------------------------------------
@@ -60,7 +67,10 @@ class Poller(threading.Thread):
 
     def run_cycle(self) -> dict:
         cfg = config.load()
-        self.status.update(running=True, current_ip=None, last_error=None)
+        self.status.update(running=True, current_ip=None, last_error=None,
+                           scan_active=True, scan_total=0, scan_done=0,
+                           scan_current=None, scan_started_at=_now_iso(),
+                           scan_finished_at=None)
         found = 0
         try:
             devices = scanner.scan(
@@ -83,66 +93,29 @@ class Poller(threading.Thread):
             targets = [d for d in devices if d["ip"] not in excluded]
             log.info("scan found %d devices (incl. known), %d after exclusions", len(devices), len(targets))
 
-            for dev in targets:
+            self.status["scan_total"] = len(targets)
+            self._push_progress(cfg)  # start ping: 0/total, active
+
+            for i, dev in enumerate(targets):
                 if self._stop.is_set():
                     break
                 ip = dev["ip"]
                 self.status["current_ip"] = ip
+                self.status["scan_current"] = ip
                 log.info("scanning %s", ip)
-                cli_wait = int(cfg.get("cli_wait_seconds", 15))
-                max_wait = max(int(cfg.get("cli_max_wait_seconds", 60)), cli_wait)
-                t0 = time.monotonic()
-                try:
-                    screen = capture_receiver_cli(
-                        host=ip,
-                        user=cfg["ssh_user"],
-                        key_path=cfg["ssh_key_path"],
-                        command=cfg["cli_command"],
-                        min_wait=min(int(cfg.get("cli_min_wait_seconds", 10)), max_wait),
-                        max_wait=max_wait,
-                        stable_seconds=int(cfg.get("cli_stable_seconds", 8)),
-                        header_seconds=int(cfg.get("cli_header_seconds", 15)),
-                        connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
-                        cols=int(cfg.get("term_cols", 200)),
-                        rows=int(cfg.get("term_rows", 60)),
-                    )
-                except ReceiverAuthFailed as exc:
-                    # SSH is open but every method was rejected — likely a real
-                    # receiver with a credential mismatch. Surface it.
-                    log.warning("auth rejected at %s: %s", ip, exc)
-                    continue
-                except ReceiverUnreachable:
-                    continue  # not a receiver / refused / timeout -> skip quietly
-                except Exception as exc:
-                    log.warning("capture failed for %s: %s", ip, exc)
-                    continue
-
-                parsed = parser.parse_screen(screen)
-                if not parser.is_valid_receiver(parsed):
-                    if screen.strip():
-                        # SSH worked and something rendered, but no receiver data —
-                        # usually a non-receiver, or a receiver that didn't paint in time.
-                        log.info("no valid receiver data at %s (%d chars captured)", ip, len(screen))
-                    continue
-
-                # Confirmed a receiver. Some report their own MAC/IP as "unknown";
-                # backfill from the arp-scan result so the sticky identity is stable.
-                recv = parsed.setdefault("receiver", {})
-                if not recv.get("mac_address") and dev.get("mac"):
-                    recv["mac_address"] = dev["mac"]
-                if not recv.get("ip_address"):
-                    recv["ip_address"] = ip
-
-                self.storage.save_result(parsed, screen, _now_iso(), ip)
-                found += 1
-                dur = time.monotonic() - t0
-                capped = " (hit max_wait)" if dur >= max_wait - 0.5 else ""
-                log.info("recorded receiver at %s (%d nodes) in %.0fs%s", ip, len(parsed["nodes"]), dur, capped)
+                if self._scan_one(cfg, dev, ip):
+                    found += 1
+                self.status["scan_done"] = i + 1
+                # Incremental upload: push this receiver's result (if any) plus
+                # live progress, so the dashboard advances receiver-by-receiver
+                # instead of jumping only at the end of the cycle.
+                self._push_progress(cfg)
         finally:
             self.status.update(running=False, current_ip=None,
-                               last_run=_now_iso(), last_found=found)
-
-        self.upload_pending(cfg)
+                               last_run=_now_iso(), last_found=found,
+                               scan_active=False, scan_current=None,
+                               scan_finished_at=_now_iso())
+            self._push_progress(cfg)  # final flush + "scan complete"
 
         # Keep the local DB bounded: trim old uploaded results per receiver.
         try:
@@ -154,32 +127,116 @@ class Poller(threading.Thread):
 
         return self.status
 
-    def upload_pending(self, cfg: dict | None = None) -> int:
+    def _scan_one(self, cfg: dict, dev: dict, ip: str) -> bool:
+        """Capture, parse and store a single host. Returns True if a receiver
+        was recorded, False if the host was skipped (not a receiver / error)."""
+        cli_wait = int(cfg.get("cli_wait_seconds", 15))
+        max_wait = max(int(cfg.get("cli_max_wait_seconds", 60)), cli_wait)
+        t0 = time.monotonic()
+        try:
+            screen = capture_receiver_cli(
+                host=ip,
+                user=cfg["ssh_user"],
+                key_path=cfg["ssh_key_path"],
+                command=cfg["cli_command"],
+                min_wait=min(int(cfg.get("cli_min_wait_seconds", 10)), max_wait),
+                max_wait=max_wait,
+                stable_seconds=int(cfg.get("cli_stable_seconds", 8)),
+                header_seconds=int(cfg.get("cli_header_seconds", 15)),
+                connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
+                cols=int(cfg.get("term_cols", 200)),
+                rows=int(cfg.get("term_rows", 60)),
+            )
+        except ReceiverAuthFailed as exc:
+            # SSH is open but every method was rejected — likely a real
+            # receiver with a credential mismatch. Surface it.
+            log.warning("auth rejected at %s: %s", ip, exc)
+            return False
+        except ReceiverUnreachable:
+            return False  # not a receiver / refused / timeout -> skip quietly
+        except Exception as exc:
+            log.warning("capture failed for %s: %s", ip, exc)
+            return False
+
+        parsed = parser.parse_screen(screen)
+        if not parser.is_valid_receiver(parsed):
+            if screen.strip():
+                # SSH worked and something rendered, but no receiver data —
+                # usually a non-receiver, or a receiver that didn't paint in time.
+                log.info("no valid receiver data at %s (%d chars captured)", ip, len(screen))
+            return False
+
+        # Confirmed a receiver. Some report their own MAC/IP as "unknown";
+        # backfill from the arp-scan result so the sticky identity is stable.
+        recv = parsed.setdefault("receiver", {})
+        if not recv.get("mac_address") and dev.get("mac"):
+            recv["mac_address"] = dev["mac"]
+        if not recv.get("ip_address"):
+            recv["ip_address"] = ip
+
+        self.storage.save_result(parsed, screen, _now_iso(), ip)
+        dur = time.monotonic() - t0
+        capped = " (hit max_wait)" if dur >= max_wait - 0.5 else ""
+        log.info("recorded receiver at %s (%d nodes) in %.0fs%s", ip, len(parsed["nodes"]), dur, capped)
+        return True
+
+    def _scan_payload(self) -> dict:
+        s = self.status
+        return {
+            "active": bool(s["scan_active"]),
+            "total": int(s["scan_total"]),
+            "done": int(s["scan_done"]),
+            "current": s["scan_current"],
+            "started_at": s["scan_started_at"],
+            "finished_at": s["scan_finished_at"],
+        }
+
+    def _push_progress(self, cfg: dict) -> None:
+        """Upload any pending results together with the live scan progress."""
+        try:
+            self.upload_pending(cfg, scan=self._scan_payload())
+        except Exception:
+            log.exception("progress upload failed")
+
+        # Keep the local DB bounded: trim old uploaded results per receiver.
+        try:
+            removed = self.storage.prune(int(cfg.get("results_keep_per_receiver", 200)))
+            if removed:
+                log.info("pruned %d old local results", removed)
+        except Exception:
+            log.exception("prune failed")
+
+        return self.status
+
+    def upload_pending(self, cfg: dict | None = None, scan: dict | None = None) -> int:
         # Only one upload at a time — a manual "Upload now" must not race the
-        # end-of-cycle upload and re-post the same readings.
+        # per-receiver / end-of-cycle uploads and re-post the same readings.
         if not self._upload_lock.acquire(blocking=False):
             log.info("upload already in progress; skipping")
             return 0
         try:
-            return self._do_upload(cfg)
+            return self._do_upload(cfg, scan=scan)
         finally:
             self._upload_lock.release()
 
-    def _do_upload(self, cfg: dict | None = None) -> int:
+    def _do_upload(self, cfg: dict | None = None, scan: dict | None = None) -> int:
         cfg = cfg or config.load()
         pending = self.storage.unuploaded()
         self.status["pending_upload"] = len(pending)
-        if not pending:
+        # Nothing to say: no pending results and no progress to report.
+        if not pending and scan is None:
             return 0
         try:
             accepted = pusher.push(
-                cfg["server_url"], cfg["api_token"], cfg["site_name"], pending
+                cfg["server_url"], cfg["api_token"], cfg["site_name"], pending, scan=scan
             )
-            self.storage.mark_uploaded(accepted)
+            if pending:
+                self.storage.mark_uploaded(accepted)
             self.status["pending_upload"] = self.storage.pending_count()
             self.status["last_upload"] = _now_iso()
             self.status["last_upload_count"] = len(accepted)
-            log.info("uploaded %d results", len(accepted))
+            if accepted:
+                log.info("uploaded %d results", len(accepted))
             return len(accepted)
         except pusher.PushError as exc:
             self.status["last_error"] = f"upload: {exc}"
