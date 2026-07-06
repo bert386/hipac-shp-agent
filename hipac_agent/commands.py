@@ -48,7 +48,7 @@ class CommandRunner(threading.Thread):
         if not cfg.get("server_url") or not cfg.get("api_token"):
             return
         for cmd in self._fetch(cfg):
-            self._handle(cfg, cmd)
+            self._dispatch(cfg, cmd)
 
     def _fetch(self, cfg: dict) -> list[dict]:
         url = cfg["server_url"].rstrip("/") + "/api/commands"
@@ -56,7 +56,12 @@ class CommandRunner(threading.Thread):
         resp.raise_for_status()
         return resp.json().get("commands", [])
 
-    def _handle(self, cfg: dict, cmd: dict) -> None:
+    # NOTE: not named ``_handle`` — Python 3.13's threading.Thread sets an
+    # instance attribute ``self._handle`` (a _thread._ThreadHandle), which would
+    # shadow a method of that name and make ``self._handle(...)`` raise
+    # "'_thread._ThreadHandle' object is not callable", silently killing the
+    # command runner on 3.13. Keep custom Thread method names clear of internals.
+    def _dispatch(self, cfg: dict, cmd: dict) -> None:
         cid = cmd.get("id")
         action = cmd.get("action")
         params = cmd.get("params") or {}
