@@ -18,10 +18,12 @@ from . import config
 from .commands import CommandRunner
 from .poller import Poller
 from .storage import Storage
+from .terminal import TerminalServer
 
 _storage = Storage()
 _poller = Poller(_storage)
 _command_runner = CommandRunner(_storage, _poller)
+_terminal = TerminalServer()
 
 
 def _check_password(supplied: str) -> bool:
@@ -134,6 +136,7 @@ def run() -> None:
     cfg = config.load()
     _poller.start()
     _command_runner.start()
+    _terminal.start()   # self-provisions + supervises the tailnet web terminal
 
     app = create_app()
     try:

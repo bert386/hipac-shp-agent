@@ -68,6 +68,11 @@ DEFAULTS = {
     "config_password": "changeme",
     "web_host": "0.0.0.0",
     "web_port": 8080,
+    # In-browser terminal (ttyd + Tailscale Serve). The agent self-provisions
+    # ttyd and exposes it on the tailnet ONLY (ttyd binds to loopback); see
+    # terminal.py. Set terminal_enabled=false to opt a Pi out entirely.
+    "terminal_enabled": True,
+    "terminal_port": 7681,
 }
 
 
