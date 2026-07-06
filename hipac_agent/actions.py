@@ -31,9 +31,11 @@ def build_command(action: str, params: dict | None) -> tuple[str, bool]:
         return "sync && reboot", True
 
     if action == "delete_log":
-        # Fixed path only — never a caller-supplied path. Reboot after so the
-        # receiver releases the (now-unlinked) file and reclaims the space.
-        return "rm -f /persistent/log/log.dat && sync && reboot", True
+        # Fixed path only — never a caller-supplied path. List the log dir after
+        # removing so the command result captures proof it's empty (`total 0`)
+        # before the reboot; the reboot then releases the space. The `ls` output
+        # is flushed over SSH before the reboot drops the connection.
+        return "rm -f /persistent/log/log.dat && sync && ls -lh /persistent/log/ && reboot", True
 
     if action == "set_date":
         dt = str(params.get("datetime", ""))
