@@ -64,6 +64,13 @@ DEFAULTS = {
     "cli_header_seconds": 15,        # no Receiver-CLI screen by now => not a receiver
     "term_cols": 200,
     "term_rows": 60,
+    # Auto-recovery: when a receiver's CLI reports a known fault (e.g. its
+    # socket is stuck — "Address already in use"), reboot it to clear the fault
+    # so the next scan captures normally. Guarded so a genuinely broken receiver
+    # can't reboot-loop: a per-receiver cooldown + a cap on consecutive reboots.
+    "fault_auto_reboot": True,
+    "fault_reboot_cooldown_seconds": 1800,   # min gap between auto-reboots of one receiver
+    "fault_reboot_max_attempts": 3,          # after this many with no recovery, log only
     # Local web UI
     "config_password": "changeme",
     "web_host": "0.0.0.0",

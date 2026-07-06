@@ -58,6 +58,32 @@ class Storage:
             self._conn.commit()
             return cur.lastrowid
 
+    def save_fault(self, receiver: dict, fault: dict, polled_at: str, source_ip: str,
+                   raw_screen: str = "") -> int:
+        """Store a receiver-fault result (no nodes) so it uploads to the server
+        and gets logged on the receiver's card. ``fault`` = {code, message, action}."""
+        payload = {
+            "receiver": receiver,
+            "nodes": [],
+            "fault": fault,
+            "polled_at": polled_at,
+            "source_ip": source_ip,
+        }
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO results (receiver_mac, receiver_ip, polled_at, payload, raw_screen) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    receiver.get("mac_address"),
+                    receiver.get("ip_address") or source_ip,
+                    polled_at,
+                    json.dumps(payload),
+                    raw_screen,
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
     def unuploaded(self, limit: int = 500) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(

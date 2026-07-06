@@ -10,7 +10,13 @@ import time
 from datetime import datetime, timezone
 
 from . import config, parser, pusher, scanner
-from .ssh_client import ReceiverAuthFailed, ReceiverUnreachable, capture_receiver_cli
+from .actions import build_command
+from .ssh_client import (
+    ReceiverAuthFailed,
+    ReceiverUnreachable,
+    capture_receiver_cli,
+    exec_receiver_command,
+)
 from .storage import Storage
 
 log = logging.getLogger("hipac.poller")
@@ -27,6 +33,9 @@ class Poller(threading.Thread):
         self._wake = threading.Event()   # set to trigger an immediate cycle
         self._stop = threading.Event()
         self._upload_lock = threading.Lock()  # serialise auto + manual uploads
+        # Per-receiver auto-reboot budget (key -> {"at": monotonic, "count": n}),
+        # so a stuck receiver is rebooted to recover but can't reboot-loop.
+        self._fault_reboots: dict[str, dict] = {}
         self.status = {
             "running": False,
             "current_ip": None,
@@ -160,9 +169,15 @@ class Poller(threading.Thread):
 
         parsed = parser.parse_screen(screen)
         if not parser.is_valid_receiver(parsed):
-            if screen.strip():
-                # SSH worked and something rendered, but no receiver data —
-                # usually a non-receiver, or a receiver that didn't paint in time.
+            # SSH worked but the CLI didn't render a receiver. If it printed a
+            # known receiver-side fault (e.g. a stuck socket), log it to the card
+            # and reboot the receiver to clear it — next pass captures normally.
+            fault = parser.detect_cli_fault(screen)
+            if fault:
+                self._handle_receiver_fault(cfg, dev, ip, fault, screen)
+            elif screen.strip():
+                # Something rendered but no receiver data — usually a
+                # non-receiver, or a receiver that didn't paint in time.
                 log.info("no valid receiver data at %s (%d chars captured)", ip, len(screen))
             return False
 
@@ -175,10 +190,62 @@ class Poller(threading.Thread):
             recv["ip_address"] = ip
 
         self.storage.save_result(parsed, screen, _now_iso(), ip)
+        # Recovered: reset this receiver's auto-reboot budget.
+        self._fault_reboots.pop(self._fault_key(recv.get("mac_address"), ip), None)
         dur = time.monotonic() - t0
         capped = " (hit max_wait)" if dur >= max_wait - 0.5 else ""
         log.info("recorded receiver at %s (%d nodes) in %.0fs%s", ip, len(parsed["nodes"]), dur, capped)
         return True
+
+    @staticmethod
+    def _fault_key(mac: str | None, ip: str) -> str:
+        return (mac or "").lower() or ip
+
+    def _handle_receiver_fault(self, cfg: dict, dev: dict, ip: str, fault: dict, screen: str) -> None:
+        """Record a known receiver-side CLI fault and (cooldown-permitting)
+        reboot the receiver to clear it."""
+        mac = (dev.get("mac") or "").lower()
+        action = self._maybe_auto_reboot(cfg, self._fault_key(mac, ip), ip)
+        log.warning("receiver fault at %s: %s — %s", ip, fault["message"], action)
+        if mac:
+            self.storage.save_fault(
+                {"mac_address": mac, "ip_address": ip},
+                {**fault, "action": action},
+                _now_iso(), ip, raw_screen=screen[:4000],
+            )
+        else:
+            log.warning("fault at %s not reported (no MAC to key it)", ip)
+
+    def _maybe_auto_reboot(self, cfg: dict, key: str, ip: str) -> str:
+        """Reboot the receiver if allowed by config + the per-receiver budget.
+        Returns a short human description of what was done (goes on the card)."""
+        if not cfg.get("fault_auto_reboot", True):
+            return "auto-reboot disabled"
+        cooldown = int(cfg.get("fault_reboot_cooldown_seconds", 1800))
+        max_attempts = int(cfg.get("fault_reboot_max_attempts", 3))
+        now = time.monotonic()
+        entry = self._fault_reboots.get(key, {"at": 0.0, "count": 0})
+
+        if entry["count"] and (now - entry["at"]) < cooldown:
+            return f"in cooldown (auto-rebooted {int(now - entry['at'])}s ago)"
+        if entry["count"] >= max_attempts:
+            return f"needs manual attention (auto-rebooted {entry['count']}× without recovery)"
+
+        attempt = entry["count"] + 1
+        command, expect_disconnect = build_command("reboot", {})
+        try:
+            exec_receiver_command(
+                host=ip, user=cfg["ssh_user"], key_path=cfg["ssh_key_path"],
+                command=command, connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
+                expect_disconnect=expect_disconnect,
+            )
+            result = f"auto-reboot issued (attempt {attempt})"
+        except Exception as exc:  # noqa: BLE001 - reboot must never crash the scan
+            log.warning("auto-reboot of %s failed: %s", ip, exc)
+            result = f"auto-reboot failed: {exc}"
+        # Count the attempt either way so an unreachable box backs off too.
+        self._fault_reboots[key] = {"at": now, "count": attempt}
+        return result
 
     def _scan_payload(self) -> dict:
         s = self.status

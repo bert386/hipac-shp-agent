@@ -108,3 +108,25 @@ def header_ready(text: str) -> bool:
     field shows a real address rather than "unknown"/blank. The header paints
     last and can be slow, so this signals the whole screen is fully rendered."""
     return bool(_RADIO_READY.search(text))
+
+
+# Known receiver-side CLI faults, recognised from the captured screen. When
+# `receiver_cli` can't start it prints an error instead of the TUI. The classic
+# one (seen after a network blip) is its listening socket still being held by a
+# previous instance — rebooting the receiver clears it. Each entry maps a
+# recognisable substring to a short code + a human message.
+_CLI_FAULTS = (
+    ("Address already in use", "cli_socket_busy",
+     "receiver_cli couldn't start — socket already in use"),
+    ("Failed to bind socket", "cli_socket_busy",
+     "receiver_cli couldn't start — failed to bind socket"),
+)
+
+
+def detect_cli_fault(text: str) -> dict | None:
+    """Return ``{"code", "message"}`` if the screen shows a known receiver-side
+    CLI fault (instead of the normal TUI), else None. A reboot clears these."""
+    for needle, code, message in _CLI_FAULTS:
+        if needle in text:
+            return {"code": code, "message": message}
+    return None

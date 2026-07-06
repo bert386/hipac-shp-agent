@@ -47,6 +47,32 @@ Accept: application/json
 - `id` is the agent's local row id, echoed back so it can mark rows uploaded.
 - All node fields are strings (captured verbatim from the CLI).
 
+#### Fault results (optional)
+
+When a receiver's CLI faults (e.g. its socket is stuck — `Address already in
+use`), the agent can't capture node data, so it sends a **fault result** instead:
+`receiver.mac_address` + an empty `nodes` array + a `fault` object. The agent
+also auto-reboots the receiver to clear it (cooldown-guarded).
+
+```json
+{
+  "id": 43,
+  "receiver": { "mac_address": "3c:18:a0:23:ac:d7", "ip_address": "192.168.1.186" },
+  "nodes": [],
+  "fault": {
+    "code": "cli_socket_busy",
+    "message": "receiver_cli couldn't start — socket already in use",
+    "action": "auto-reboot issued (attempt 1)"
+  },
+  "polled_at": "2026-07-03T09:00:00Z",
+  "source_ip": "192.168.1.186"
+}
+```
+
+The server records the fault on the receiver **without** bumping `last_seen_at`
+or clobbering the known `radio_address`/`fw_version` (the node data is stale),
+and **clears** it on the next successful (non-fault) poll for that receiver.
+
 ### Response `200`
 
 ```json

@@ -5,4 +5,4 @@ Scans the local network for receivers, logs into each over SSH, captures the
 results locally and pushes them to the central Laravel server.
 """
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
