@@ -120,7 +120,21 @@ def test_disabled_is_a_noop(monkeypatch):
     # Should return immediately without touching ttyd/serve.
     monkeypatch.setattr(terminal, "ensure_binary",
                         lambda: (_ for _ in ()).throw(AssertionError("must not provision")))
-    terminal.TerminalServer().run()
+    srv = terminal.TerminalServer()
+    srv.run()
+    assert srv.status["enabled"] is False
+    assert srv.status["running"] is False
+
+
+def test_unsupported_arch_reports_status(monkeypatch):
+    monkeypatch.setattr(terminal.config, "load",
+                        lambda: {"terminal_enabled": True, "terminal_port": 7681})
+    monkeypatch.setattr(terminal.platform, "machine", lambda: "sparc64")
+    srv = terminal.TerminalServer()
+    srv.run()
+    assert srv.status["supported"] is False
+    assert srv.status["running"] is False
+    assert srv.status["port"] == 7681
 
 
 # -- Thread-internal name-collision guard (same class of bug as commands.py) --

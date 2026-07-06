@@ -218,6 +218,20 @@ class TerminalServer(threading.Thread):
         super().__init__(daemon=True)
         self._stop = threading.Event()
         self._proc: subprocess.Popen | None = None
+        # Live health for the local web UI. Single-key mutations are atomic
+        # under the GIL, so the web thread can read this without a lock.
+        self.status = {
+            "enabled": True,
+            "supported": True,   # this arch has a pinned ttyd build
+            "installed": False,  # binary present + checksum-verified
+            "serving": False,    # exposed on the tailnet via `tailscale serve`
+            "running": False,    # ttyd process alive right now
+            "port": None,
+            "detail": "starting",
+        }
+
+    def _set(self, **kw) -> None:
+        self.status.update(kw)
 
     def stop(self) -> None:
         self._stop.set()
@@ -225,17 +239,26 @@ class TerminalServer(threading.Thread):
 
     def run(self) -> None:
         cfg = config.load()
+        port = int(cfg.get("terminal_port", 7681))
+        self._set(port=port)
         if not cfg.get("terminal_enabled", True):
+            self._set(enabled=False, detail="disabled in config")
             log.info("in-browser terminal disabled (terminal_enabled=false)")
+            return
+        if not _asset_for_arch():
+            self._set(supported=False, detail=f"no ttyd build for {platform.machine()}")
+            log.warning("no pinned ttyd build for arch %r; terminal disabled", platform.machine())
             return
         binary = ensure_binary()
         if not binary:
+            self._set(detail="ttyd download/verify failed")
             return
+        self._set(installed=True)
         write_wrapper(cfg)
-        port = int(cfg.get("terminal_port", 7681))
         if _reap_stray(port):
             time.sleep(1)  # let the old process release the port
-        ensure_serve(port)          # best-effort; ttyd still runs if this fails
+        served = ensure_serve(port)  # best-effort; ttyd still runs if this fails
+        self._set(serving=served)
         self._supervise(binary, port)
 
     # NOTE: keep custom method names clear of threading.Thread internals (e.g.
@@ -245,18 +268,24 @@ class TerminalServer(threading.Thread):
         while not self._stop.is_set():
             started = time.monotonic()
             self._spawn(binary, port)
+            self._set(running=True, detail=(
+                "serving on tailnet" if self.status["serving"]
+                else "ttyd running (local only — operator not set?)"))
             while self._proc.poll() is None and not self._stop.is_set():
                 self._stop.wait(timeout=2)
+            self._set(running=False)
             if self._stop.is_set():
                 break
             ran = time.monotonic() - started
             # A ttyd that ran a good while then died is a fresh fault — reset the
             # backoff. A ttyd that dies instantly (e.g. port busy) is throttled.
             backoff = 2 if ran > 60 else min(backoff * 2, 60)
+            self._set(detail=f"ttyd exited (code {self._proc.returncode}); retrying")
             log.warning("ttyd exited (code %s) after %.0fs; restarting in %ss",
                         self._proc.returncode, ran, backoff)
             self._stop.wait(timeout=backoff)
         self._terminate()
+        self._set(running=False)
 
     def _spawn(self, binary: str, port: int) -> None:
         cmd = [binary, "-p", str(port), "-i", "lo", "-W", "-a", _wrapper_path()]

@@ -8,6 +8,13 @@
       <p class="muted">Last run: <span id="s-lastrun">{{ status.last_run or "never" }}</span></p>
       <p class="muted">Receivers found last run: <span id="s-found">{{ status.last_found }}</span></p>
       <p class="muted">Polling every <span id="s-interval">{{ poll_interval }}</span> min</p>
+      <p class="muted" title="{{ terminal.detail }}">Terminal:
+        {% if not terminal.enabled %}<span id="s-term" class="pill">off</span>
+        {% elif not terminal.supported %}<span id="s-term" class="pill warn">unsupported</span>
+        {% elif terminal.running and terminal.serving %}<span id="s-term" class="pill ok">on tailnet ✓</span>
+        {% elif terminal.running %}<span id="s-term" class="pill warn">local only</span>
+        {% else %}<span id="s-term" class="pill warn">not running</span>{% endif %}
+      </p>
     </div>
     <div>
       <p class="muted">Pending upload: <span id="s-pending">{{ status.pending_upload }}</span></p>
@@ -61,6 +68,15 @@
   const $ = (id) => document.getElementById(id);
   let wasRunning = {{ 'true' if status.running else 'false' }};
 
+  function termLabel(t) {
+    if (!t) return ["unknown", "pill"];
+    if (!t.enabled) return ["off", "pill"];
+    if (!t.supported) return ["unsupported", "pill warn"];
+    if (t.running && t.serving) return ["on tailnet ✓", "pill ok"];
+    if (t.running) return ["local only", "pill warn"];
+    return ["not running", "pill warn"];
+  }
+
   async function poll() {
     try {
       const resp = await fetch("{{ url_for('status') }}", { cache: "no-store" });
@@ -87,6 +103,14 @@
       } else {
         $("s-error-wrap").style.display = "none";
       }
+      const term = $("s-term");
+      if (term) {
+        const [txt, cls] = termLabel(s.terminal);
+        term.textContent = txt;
+        term.className = cls;
+        term.parentElement.title = (s.terminal && s.terminal.detail) || "";
+      }
+
       $("s-live").textContent = "live";
       $("s-live").className = "pill ok";
 

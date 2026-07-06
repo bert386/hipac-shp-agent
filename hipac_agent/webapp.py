@@ -66,6 +66,7 @@ def create_app() -> Flask:
         return render_template(
             "index.html",
             status=_poller.status,
+            terminal=_terminal.status,
             receivers=_storage.latest_per_receiver(),
             site_name=config.load().get("site_name"),
             poll_interval=config.load().get("poll_interval_minutes"),
@@ -111,6 +112,7 @@ def create_app() -> Flask:
         cfg = config.load()
         return jsonify({
             **_poller.status,
+            "terminal": _terminal.status,
             "site_name": cfg.get("site_name"),
             "poll_interval_minutes": cfg.get("poll_interval_minutes"),
             "server_url": cfg.get("server_url"),
