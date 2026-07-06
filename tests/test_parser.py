@@ -62,6 +62,29 @@ def test_receiver_with_unknown_header_is_valid_via_nodes():
     assert nodes[3]["rssi_rn"] == "-59"
 
 
+def test_nodes_with_blank_firmware():
+    # Real capture from receiver 192.168.1.174 after a network outage: the nodes
+    # are fully present and reachable (radio/batt/heartbeat/RSSI all report) but
+    # the F/W Ver. column has gone blank. These must still parse (fw_ver=None),
+    # not be dropped — otherwise live nodes wrongly go stale on the dashboard.
+    screen = (
+        "x Node Properties                                                              x\n"
+        "x Relayx F/W Ver.    x Radio Address     x Batt.x Heartbeatx RSSI N-Rx RSSI R-Nx\n"
+        "x R1   x             x 80:34:28:1d:30:7e x 176  x 04:13:23 x -53     x -55     x\n"
+        "x R2   x             x 80:34:28:1c:2d:f9 x 179  x 04:13:23 x -48     x -52     x\n"
+        "x R3   x v0.23.3     x 80:34:28:1b:c8:0b x 174  x 04:13:23 x -46     x -49     x\n"
+        "x      x             x                   x      x          x         x         x\n"
+    )
+    nodes = parser.parse_nodes(screen)
+    assert len(nodes) == 3  # 2 blank-firmware + 1 normal; header & blank row ignored
+    assert nodes[0] == {
+        "relay": "R1", "fw_ver": None, "radio_address": "80:34:28:1d:30:7e",
+        "batt": "176", "heartbeat": "04:13:23", "rssi_nr": "-53", "rssi_rn": "-55",
+    }
+    assert nodes[1]["fw_ver"] is None
+    assert nodes[2]["fw_ver"] == "v0.23.3"  # firmware still captured when present
+
+
 def test_header_ready():
     # Real radio address in the header -> ready.
     assert parser.header_ready(SAMPLE)

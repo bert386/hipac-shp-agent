@@ -33,9 +33,15 @@ _RECEIVER_FIELDS = {
 # letter 'x'; the mock/sample uses Unicode │; ncurses' ASCII fallback uses |.
 # Matching relay → firmware → radio addr → battery → heartbeat → RSSI×2 with a
 # non-digit gap (\D+?) between fields sidesteps whatever the separator is.
+#
+# Firmware is OPTIONAL: after a receiver-side fault (e.g. following a network
+# outage) nodes stay fully present and reachable — radio/batt/heartbeat/RSSI all
+# report — but the F/W Ver. column goes blank. Requiring firmware here dropped
+# those still-live nodes from the capture, so they wrongly went stale on the
+# dashboard. When the column is blank fw_ver is None and the node still parses.
 _NODE_ROW = re.compile(
     r"R(?P<relay>\d+)\D+?"
-    r"(?P<fw_ver>v[\d.]+)\D+?"
+    r"(?:(?P<fw_ver>v[\d.]+)\D+?)?"
     r"(?P<radio_address>[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\D+?"
     r"(?P<batt>\d+)\D+?"
     r"(?P<heartbeat>\d{1,2}:\d{2}:\d{2})\D+?"
