@@ -20,6 +20,12 @@ fi
 echo "==> Bringing Tailscale up (SSH enabled) as ${HOSTNAME_ARG}"
 tailscale up --ssh --authkey="${AUTHKEY}" --hostname="${HOSTNAME_ARG}"
 
+# Let the agent user manage `tailscale serve` (the in-browser web terminal)
+# without root. Persistent setting; do it here so a freshly provisioned Pi can
+# expose its terminal the first time the agent starts, no extra step.
+echo "==> Granting operator to ${SUDO_USER:-pi} (for the web terminal)"
+tailscale set --operator="${SUDO_USER:-pi}" || true
+
 TS_IP="$(tailscale ip -4 2>/dev/null | head -1 || true)"
 echo
 echo "Done. Tailscale IP: ${TS_IP:-<pending>}"

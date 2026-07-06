@@ -9,6 +9,13 @@ CLONE="/home/${SRC_USER}/hipac-shp-agent"
 
 cp -r "${CLONE}/hipac_agent" /opt/hipac-agent/
 
+# Keep the deploy script itself current. This file runs from /opt, and until
+# now it only copied the Python package — so any change to THIS script (e.g. the
+# operator grant below) never reached /opt and silently never ran. Copy ourselves
+# forward so future deploy-script changes propagate without re-running install.sh.
+cp "${CLONE}/agent-deploy.sh" /opt/hipac-agent/agent-deploy.sh
+chmod 755 /opt/hipac-agent/agent-deploy.sh
+
 # Let the agent user drive `tailscale serve` (the in-browser terminal) without
 # sudo. This is the one privileged step terminal.py can't do itself; it's
 # idempotent and we're already root here. Harmless if Tailscale isn't installed.
