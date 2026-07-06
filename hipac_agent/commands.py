@@ -10,6 +10,7 @@ import logging
 import os
 import subprocess
 import threading
+import time
 
 import requests
 
@@ -36,23 +37,39 @@ class CommandRunner(threading.Thread):
 
     def run(self) -> None:
         while not self._stop.is_set():
+            held = False
             try:
-                self.poll_once()
+                held = self.poll_once()
             except Exception:
                 log.exception("command poll failed")
-            secs = max(15, int(config.load().get("command_poll_seconds", 60)))
-            self._stop.wait(timeout=secs)
+            if not held:
+                # The long-poll wasn't held (old server / disabled / error) — pace
+                # ourselves with the fallback interval so we don't hammer.
+                secs = max(5, int(config.load().get("command_poll_seconds", 60)))
+                self._stop.wait(timeout=secs)
+            # else: the long-poll itself paced us; loop immediately to re-poll.
 
-    def poll_once(self) -> None:
+    def poll_once(self) -> bool:
+        """Fetch and dispatch pending commands. Returns True if the server held
+        the long-poll (caller should re-poll immediately), False if it returned
+        fast/empty or isn't configured (caller should back off)."""
         cfg = config.load()
         if not cfg.get("server_url") or not cfg.get("api_token"):
-            return
-        for cmd in self._fetch(cfg):
+            return False
+        wait = max(0, int(cfg.get("command_longpoll_seconds", 25)))
+        t0 = time.monotonic()
+        cmds = self._fetch(cfg, wait)
+        for cmd in cmds:
             self._dispatch(cfg, cmd)
+        # "Held" = we got work, or the request stayed open ~the wait window
+        # (so the server supports long-poll and we should keep it warm).
+        return bool(cmds) or (time.monotonic() - t0) >= max(1, wait * 0.5)
 
-    def _fetch(self, cfg: dict) -> list[dict]:
+    def _fetch(self, cfg: dict, wait: int = 0) -> list[dict]:
         url = cfg["server_url"].rstrip("/") + "/api/commands"
-        resp = requests.get(url, headers=_auth(cfg), timeout=30)
+        params = {"wait": wait} if wait else None
+        # Request timeout must exceed the server's hold window.
+        resp = requests.get(url, headers=_auth(cfg), params=params, timeout=wait + 30)
         resp.raise_for_status()
         return resp.json().get("commands", [])
 

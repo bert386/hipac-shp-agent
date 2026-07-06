@@ -42,7 +42,11 @@ DEFAULTS = {
     "arp_scan_timeout": 120,
     "arp_scan_retries": 5,           # more retries = fewer missed hosts on flaky nets
     "results_keep_per_receiver": 200,  # local DB: keep this many uploaded results/receiver
-    # How often to check the server for pending maintenance commands.
+    # Command delivery. The agent long-polls: it asks the server to hold the
+    # request open for up to command_longpoll_seconds and return the instant a
+    # command is queued (near-instant delivery). command_poll_seconds is the
+    # fallback pace used only when long-poll isn't held (old server / errors).
+    "command_longpoll_seconds": 25,
     "command_poll_seconds": 60,
     # Command run for the "Update agent" button (pull latest, redeploy, restart).
     # Requires the sudoers entry from install.sh. Empty = disabled.
