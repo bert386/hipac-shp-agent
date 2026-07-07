@@ -5,6 +5,7 @@ wakes early if the web UI requests an immediate scan ("Scan now").
 """
 
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -24,6 +25,51 @@ log = logging.getLogger("hipac.poller")
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# -- vitals parsing helpers (tolerant: bad/blank input -> None) ---------------
+def _to_int(s: str | None) -> int | None:
+    try:
+        return int(str(s).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float(s: str | None) -> float | None:
+    try:
+        return round(float(str(s).strip()), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_int(s: str | None) -> int | None:
+    """First run of digits in a string, e.g. 'MemTotal:  503260 kB' -> 503260."""
+    if not s:
+        return None
+    m = re.search(r"\d+", s)
+    return int(m.group()) if m else None
+
+
+def _mem_pct(total: str | None, avail: str | None, free: str | None) -> int | None:
+    """Percent of memory available, from /proc/meminfo lines (kB). Falls back to
+    MemFree on older kernels that don't expose MemAvailable."""
+    t = _first_int(total)
+    a = _first_int(avail)
+    if a is None:
+        a = _first_int(free)
+    if not t or a is None:
+        return None
+    return max(0, min(100, round(a / t * 100)))
+
+
+def _df_used_pct(df_line: str | None) -> int | None:
+    """Extract the Use% from a `df -k` data line (the token ending in '%')."""
+    if not df_line:
+        return None
+    for tok in df_line.split():
+        if tok.endswith("%"):
+            return _to_int(tok.rstrip("%"))
+    return None
 
 
 class Poller(threading.Thread):
@@ -196,11 +242,15 @@ class Poller(threading.Thread):
         if not recv.get("ip_address"):
             recv["ip_address"] = ip
 
-        # Read the receiver's own clock and record how far it is off UTC.
+        # Read the receiver's clock + health vitals (one SSH round-trip).
         if cfg.get("report_receiver_clock", True):
-            clock = self._read_receiver_clock(cfg, ip)
-            if clock:
-                recv["clock_time"], recv["clock_skew_seconds"] = clock
+            vitals = self._read_receiver_vitals(cfg, ip)
+            if vitals:
+                if "clock_time" in vitals:
+                    recv["clock_time"] = vitals["clock_time"]
+                    recv["clock_skew_seconds"] = vitals["clock_skew_seconds"]
+                if vitals.get("health"):
+                    recv["health"] = vitals["health"]
 
         self.storage.save_result(parsed, screen, _now_iso(), ip)
         # Recovered: reset this receiver's auto-reboot budget.
@@ -214,27 +264,64 @@ class Poller(threading.Thread):
     def _fault_key(mac: str | None, ip: str) -> str:
         return (mac or "").lower() or ip
 
-    def _read_receiver_clock(self, cfg: dict, ip: str) -> tuple[str, int] | None:
-        """Read the receiver's UTC clock (epoch) over SSH and return
-        ``(clock_iso, skew_seconds)`` where skew = receiver − true UTC (the Pi's
-        network-synced time, sampled at the same instant). None if unreadable.
-        Epoch is timezone-independent, so this works regardless of receiver TZ."""
+    # One SSH round-trip that returns the receiver's clock + health vitals, all
+    # from tools baked into the receiver's BusyBox/Buildroot image (no installs).
+    # Emits `key=value` lines so a missing/failed field doesn't break the others.
+    _VITALS_CMD = (
+        "echo E=$(date -u +%s 2>/dev/null); "
+        "echo U=$(cut -d. -f1 /proc/uptime 2>/dev/null); "
+        "echo L=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null); "
+        "echo MT=$(grep '^MemTotal:' /proc/meminfo 2>/dev/null); "
+        "echo MA=$(grep '^MemAvailable:' /proc/meminfo 2>/dev/null); "
+        "echo MF=$(grep '^MemFree:' /proc/meminfo 2>/dev/null); "
+        "echo D=$(df -k /persistent 2>/dev/null | tail -1); "
+        "echo G=$(wc -c < /persistent/log/log.dat 2>/dev/null)"
+    )
+
+    def _read_receiver_vitals(self, cfg: dict, ip: str) -> dict | None:
+        """Read the receiver's clock + health (uptime/load/mem/disk/log size) in
+        a single SSH command. Returns a dict with optional ``clock_time`` +
+        ``clock_skew_seconds`` and an optional ``health`` sub-dict, or None if the
+        read failed entirely. Never raises — vitals must not fail a scan."""
         try:
             pi_now = time.time()
             code, out, _ = exec_receiver_command(
                 host=ip, user=cfg["ssh_user"], key_path=cfg["ssh_key_path"],
-                command="date -u +%s",
+                command=self._VITALS_CMD,
                 connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
             )
             if code != 0:
                 return None
-            epoch = int((out or "").strip())
-        except Exception as exc:  # noqa: BLE001 - a clock read must never fail a scan
-            log.info("clock read failed for %s: %s", ip, exc)
+        except Exception as exc:  # noqa: BLE001
+            log.info("vitals read failed for %s: %s", ip, exc)
             return None
-        skew = int(round(epoch - pi_now))
-        clock_iso = datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        return clock_iso, skew
+
+        vals = {}
+        for line in (out or "").splitlines():
+            k, sep, v = line.partition("=")
+            if sep:
+                vals[k.strip()] = v.strip()
+
+        result: dict = {}
+
+        # Clock: epoch is TZ-independent; skew = receiver − Pi's true UTC.
+        epoch = _to_int(vals.get("E"))
+        if epoch is not None:
+            result["clock_time"] = datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            result["clock_skew_seconds"] = int(round(epoch - pi_now))
+
+        health = {
+            "uptime_seconds": _to_int(vals.get("U")),
+            "load_1m": _to_float(vals.get("L")),
+            "mem_pct": _mem_pct(vals.get("MT"), vals.get("MA"), vals.get("MF")),
+            "persistent_used_pct": _df_used_pct(vals.get("D")),
+            "log_bytes": _to_int(vals.get("G")),
+        }
+        health = {k: v for k, v in health.items() if v is not None}
+        if health:
+            result["health"] = health
+
+        return result or None
 
     def _handle_receiver_fault(self, cfg: dict, dev: dict, ip: str, fault: dict, screen: str) -> None:
         """Record a known receiver-side CLI fault and (cooldown-permitting)

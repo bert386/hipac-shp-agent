@@ -72,8 +72,9 @@ DEFAULTS = {
     "fault_auto_reboot": True,
     "fault_reboot_cooldown_seconds": 1800,   # min gap between auto-reboots of one receiver
     "fault_reboot_max_attempts": 3,          # after this many with no recovery, log only
-    # Read each receiver's clock during the poll (a quick `date` over SSH) and
-    # report how far it is off UTC, so the dashboard can flag clock drift.
+    # Read each receiver's clock + health vitals during the poll (one quick SSH
+    # command: date, uptime, loadavg, meminfo, df /persistent, log.dat size) so
+    # the dashboard can flag clock drift, a bloated log, and resource pressure.
     "report_receiver_clock": True,
     # Liveness heartbeat: post a tiny ping this often so the dashboard shows the
     # Pi as online between scans. Skipped while a scan is running (its own
