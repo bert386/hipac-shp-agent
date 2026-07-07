@@ -74,6 +74,11 @@ DEFAULTS = {
     # Read each receiver's clock during the poll (a quick `date` over SSH) and
     # report how far it is off UTC, so the dashboard can flag clock drift.
     "report_receiver_clock": True,
+    # Liveness heartbeat: post a tiny ping this often so the dashboard shows the
+    # Pi as online between scans. Skipped while a scan is running (its own
+    # uploads already keep the server fresh).
+    "heartbeat_enabled": True,
+    "heartbeat_seconds": 60,
     # Local web UI
     "config_password": "changeme",
     "web_host": "0.0.0.0",

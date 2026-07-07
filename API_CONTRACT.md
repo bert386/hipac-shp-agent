@@ -95,6 +95,33 @@ assumes everything sent was accepted.
 - `401` — bad/missing token (agent keeps the results queued, retries later).
 - `4xx/5xx` — logged; results stay queued for the next cycle.
 
+## Heartbeat endpoint
+
+```
+POST {server_url}/api/heartbeat
+Authorization: Bearer {api_token}
+Content-Type: application/json
+```
+
+A lightweight liveness ping the agent sends every ~60s (skipped while a scan is
+running, since the scan's own uploads already keep the server fresh). Body is
+the agent metadata only — no results:
+
+```json
+{
+  "site_name": "Warehouse A",
+  "agent_hostname": "hipacpi3",
+  "agent": { "version": "0.10.0", "uptime_seconds": 90000, "load_1m": 0.2,
+             "disk_free": 1000000, "disk_total": 2000000 },
+  "tailscale_host": "hipac-warehouse-a",
+  "tailscale_ip": "100.x.y.z"
+}
+```
+
+Response `200 { "ok": true }`. The server updates the site's agent stats +
+`last_heartbeat_at`; a normal `/api/poll` also bumps `last_heartbeat_at`. The
+dashboard shows a site online when `last_heartbeat_at` is within 180s.
+
 ## Sticky-naming keys (server side)
 
 - **Receiver** friendly name is keyed to `receiver.mac_address` — stable across

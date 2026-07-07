@@ -16,6 +16,7 @@ from flask import (
 
 from . import config
 from .commands import CommandRunner
+from .heartbeat import Heartbeat
 from .poller import Poller
 from .storage import Storage
 from .terminal import TerminalServer
@@ -24,6 +25,7 @@ _storage = Storage()
 _poller = Poller(_storage)
 _command_runner = CommandRunner(_storage, _poller)
 _terminal = TerminalServer()
+_heartbeat = Heartbeat(_poller)
 
 
 def _check_password(supplied: str) -> bool:
@@ -139,6 +141,7 @@ def run() -> None:
     _poller.start()
     _command_runner.start()
     _terminal.start()   # self-provisions + supervises the tailnet web terminal
+    _heartbeat.start()  # 60s liveness ping so the dashboard shows online/offline
 
     app = create_app()
     try:

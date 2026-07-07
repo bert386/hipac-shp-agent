@@ -79,3 +79,23 @@ def push(server_url: str, api_token: str, site_name: str, results: list[dict],
     if not accepted:
         accepted = [r["id"] for r in results if "id" in r]
     return accepted
+
+
+def heartbeat(server_url: str, api_token: str, site_name: str, timeout: int = 15) -> bool:
+    """Post a lightweight liveness ping (agent stats only, no results) so the
+    dashboard can show the Pi online between scans. Returns True on success."""
+    if not server_url or not api_token:
+        return False
+    url = server_url.rstrip("/") + "/api/heartbeat"
+    headers = {"Authorization": f"Bearer {api_token}", "Accept": "application/json"}
+    body = {
+        "site_name": site_name,
+        "agent_hostname": socket.gethostname(),
+        "agent": device.stats(),
+        **tailscale.local_identity(),
+    }
+    try:
+        resp = requests.post(url, json=body, headers=headers, timeout=timeout)
+    except requests.RequestException:
+        return False
+    return resp.status_code < 400
