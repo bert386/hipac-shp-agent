@@ -24,7 +24,9 @@ Accept: application/json
         "radio_address": "58:2b:0a:be:f9:79",
         "ip_address": "192.168.1.114",
         "mac_address": "3c:18:a0:23:ac:d7",
-        "fw_version": "v0.23.3"
+        "fw_version": "v0.23.3",
+        "clock_time": "2026-07-07T06:11:38Z",
+        "clock_skew_seconds": -2
       },
       "nodes": [
         {
@@ -46,6 +48,11 @@ Accept: application/json
 
 - `id` is the agent's local row id, echoed back so it can mark rows uploaded.
 - All node fields are strings (captured verbatim from the CLI).
+- `receiver.clock_time` / `receiver.clock_skew_seconds` (optional): the receiver's
+  own clock (read over SSH via `date -u +%s`) and how far it is off true UTC
+  (`receiver − Pi`, sampled together). The server flags the dashboard red when
+  `abs(clock_skew_seconds) > 900` (15 min). Only sent when the read succeeds; a
+  poll without them leaves the last-known value in place.
 
 #### Fault results (optional)
 

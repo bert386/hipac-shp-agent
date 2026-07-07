@@ -189,6 +189,12 @@ class Poller(threading.Thread):
         if not recv.get("ip_address"):
             recv["ip_address"] = ip
 
+        # Read the receiver's own clock and record how far it is off UTC.
+        if cfg.get("report_receiver_clock", True):
+            clock = self._read_receiver_clock(cfg, ip)
+            if clock:
+                recv["clock_time"], recv["clock_skew_seconds"] = clock
+
         self.storage.save_result(parsed, screen, _now_iso(), ip)
         # Recovered: reset this receiver's auto-reboot budget.
         self._fault_reboots.pop(self._fault_key(recv.get("mac_address"), ip), None)
@@ -200,6 +206,28 @@ class Poller(threading.Thread):
     @staticmethod
     def _fault_key(mac: str | None, ip: str) -> str:
         return (mac or "").lower() or ip
+
+    def _read_receiver_clock(self, cfg: dict, ip: str) -> tuple[str, int] | None:
+        """Read the receiver's UTC clock (epoch) over SSH and return
+        ``(clock_iso, skew_seconds)`` where skew = receiver − true UTC (the Pi's
+        network-synced time, sampled at the same instant). None if unreadable.
+        Epoch is timezone-independent, so this works regardless of receiver TZ."""
+        try:
+            pi_now = time.time()
+            code, out, _ = exec_receiver_command(
+                host=ip, user=cfg["ssh_user"], key_path=cfg["ssh_key_path"],
+                command="date -u +%s",
+                connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
+            )
+            if code != 0:
+                return None
+            epoch = int((out or "").strip())
+        except Exception as exc:  # noqa: BLE001 - a clock read must never fail a scan
+            log.info("clock read failed for %s: %s", ip, exc)
+            return None
+        skew = int(round(epoch - pi_now))
+        clock_iso = datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return clock_iso, skew
 
     def _handle_receiver_fault(self, cfg: dict, dev: dict, ip: str, fault: dict, screen: str) -> None:
         """Record a known receiver-side CLI fault and (cooldown-permitting)
