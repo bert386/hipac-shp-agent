@@ -6,10 +6,7 @@ only an action name and validated params — and this module refuses anything no
 on the list. Keep it dependency-free so it stays easy to audit and unit-test.
 """
 
-import re
-
-# datetime must be exactly YYYY-MM-DD HH:MM:SS (24h) — no shell metacharacters.
-_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+from datetime import datetime, timezone
 
 
 class UnknownAction(Exception):
@@ -38,9 +35,13 @@ def build_command(action: str, params: dict | None) -> tuple[str, bool]:
         return "rm -f /persistent/log/log.dat && sync && ls -lh /persistent/log/ && reboot", True
 
     if action == "set_date":
-        dt = str(params.get("datetime", ""))
-        if not _DATETIME_RE.match(dt):
-            raise ValueError(f"invalid datetime: {dt!r}")
-        return f'date -s "{dt}" && hwclock -w && sync && reboot', True
+        # Receivers run on UTC. Set them to the current UTC time, generated HERE
+        # at execution (the Pi keeps accurate time via the network) so the clock
+        # is "now" when it actually applies — never a stale value from when the
+        # command was queued. No caller-supplied value: it removes the manual
+        # entry field and, since the string is fixed-format digits, any shell
+        # injection surface with it.
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        return f'date -s "{now}" && hwclock -w && sync && reboot', True
 
     raise UnknownAction(action)

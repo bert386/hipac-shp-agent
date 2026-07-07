@@ -20,29 +20,25 @@ def test_delete_log_is_fixed_path_and_reboots():
     assert disconnect is True                  # reboots to release the file
 
 
-def test_set_date_valid():
-    cmd, disconnect = build_command("set_date", {"datetime": "2026-05-20 14:30:00"})
-    assert 'date -s "2026-05-20 14:30:00"' in cmd
+def test_set_date_generates_current_utc_and_reboots():
+    from datetime import datetime, timezone
+    import re as _re
+
+    cmd, disconnect = build_command("set_date", {})
+    m = _re.search(r'date -s "(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"', cmd)
+    assert m, f"expected a generated UTC timestamp in: {cmd!r}"
+    gen = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    # Generated at call time → within a minute of now (UTC).
+    assert abs((datetime.now(timezone.utc) - gen).total_seconds()) < 60
     assert "hwclock -w" in cmd and "reboot" in cmd
     assert disconnect is True
 
 
-def test_set_date_rejects_bad_format():
-    for bad in ["garbage", "2026-5-20 14:30:00", "", "2026-05-20"]:
-        try:
-            build_command("set_date", {"datetime": bad})
-            assert False, f"should have rejected {bad!r}"
-        except ValueError:
-            pass
-
-
-def test_set_date_blocks_shell_injection():
-    # A classic injection attempt must be refused by the strict format check.
-    try:
-        build_command("set_date", {"datetime": '2026-05-20 14:30:00"; rm -rf / #'})
-        assert False, "injection payload should be rejected"
-    except ValueError:
-        pass
+def test_set_date_ignores_supplied_params_no_injection():
+    # There's no caller-supplied value any more, so a stray/hostile param can't
+    # reach the shell command.
+    cmd, _ = build_command("set_date", {"datetime": '"; rm -rf / #'})
+    assert "rm -rf" not in cmd
 
 
 def test_unknown_action():
