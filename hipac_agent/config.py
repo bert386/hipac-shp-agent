@@ -62,6 +62,7 @@ DEFAULTS = {
     "cli_max_wait_seconds": 60,      # hard cap per receiver (header can be slow)
     "cli_stable_seconds": 8,         # node count unchanged this long => settled
     "cli_header_seconds": 15,        # no Receiver-CLI screen by now => not a receiver
+    "cli_blank_seconds": 25,         # CLI drawn but blank (no identity, 0 nodes) => stuck, skip fast
     "term_cols": 200,
     "term_rows": 60,
     # Auto-recovery: when a receiver's CLI reports a known fault (e.g. its

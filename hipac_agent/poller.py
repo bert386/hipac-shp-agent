@@ -152,6 +152,7 @@ class Poller(threading.Thread):
                 max_wait=max_wait,
                 stable_seconds=int(cfg.get("cli_stable_seconds", 8)),
                 header_seconds=int(cfg.get("cli_header_seconds", 15)),
+                blank_seconds=int(cfg.get("cli_blank_seconds", 25)),
                 connect_timeout=int(cfg.get("ssh_connect_timeout", 15)),
                 cols=int(cfg.get("term_cols", 200)),
                 rows=int(cfg.get("term_rows", 60)),
@@ -175,6 +176,12 @@ class Poller(threading.Thread):
             fault = parser.detect_cli_fault(screen)
             if fault:
                 self._handle_receiver_fault(cfg, dev, ip, fault, screen)
+            elif parser.is_blank_receiver(screen):
+                # Receiver_cli is drawn but the receiver knows nothing (own
+                # identity unknown, 0 nodes) — a stuck state a reboot doesn't
+                # reliably clear. Record a SKIP (no auto-reboot) so the dashboard
+                # shows it was skipped this poll and why.
+                self._handle_blank_receiver(cfg, dev, ip)
             elif screen.strip():
                 # Something rendered but no receiver data — usually a
                 # non-receiver, or a receiver that didn't paint in time.
@@ -243,6 +250,22 @@ class Poller(threading.Thread):
             )
         else:
             log.warning("fault at %s not reported (no MAC to key it)", ip)
+
+    def _handle_blank_receiver(self, cfg: dict, dev: dict, ip: str) -> None:
+        """Record a stuck/blank receiver as a SKIP (no auto-reboot — a soft
+        reboot doesn't clear this state). Shows on the dashboard as skipped."""
+        mac = (dev.get("mac") or "").lower()
+        log.info("skipping %s: receiver CLI blank (no identity, 0 nodes)", ip)
+        if mac:
+            self.storage.save_fault(
+                {"mac_address": mac, "ip_address": ip},
+                {
+                    "code": "cli_blank",
+                    "message": "Receiver CLI returned no data (blank)",
+                    "action": "Skipped this poll — needs recovery (delete-log/reboot or power-cycle)",
+                },
+                _now_iso(), ip, raw_screen="",
+            )
 
     def _maybe_auto_reboot(self, cfg: dict, key: str, ip: str) -> str:
         """Reboot the receiver if allowed by config + the per-receiver budget.

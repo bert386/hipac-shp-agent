@@ -96,6 +96,43 @@ def test_handle_fault_records_and_reboots(monkeypatch, tmp_path):
     assert pending[0]["nodes"] == []
 
 
+# -- blank / stuck receiver -----------------------------------------------
+_BLANK_SCREEN = (
+    "Receiver Properties\n"
+    " Radio Add.:  unknown\n IP Add.: unknown\n MAC Add.: unknown\n F/W Version: unknown\n"
+    "Node Properties\n"
+    " Relay | F/W Ver. | Radio Address | Batt. | Heartbeat | RSSI N-R | RSSI R-N\n"
+    "   |   |   |   |   |   |   \n"
+)
+_HEALTHY_SCREEN = (
+    "Receiver Properties\n Radio Add.:  58:2b:0a:be:f9:79\n"
+    "Node Properties\n R1 v0.23.3 80:34:28:1c:01:f6 180 06:11:40 -50 -54\n"
+)
+
+
+def test_is_blank_receiver_detects_stuck_empty_screen():
+    assert parser.is_blank_receiver(_BLANK_SCREEN) is True
+
+
+def test_is_blank_receiver_false_for_healthy_and_nonreceiver():
+    assert parser.is_blank_receiver(_HEALTHY_SCREEN) is False       # header resolved + a node
+    assert parser.is_blank_receiver("random ssh login banner") is False
+
+
+def test_handle_blank_records_skip_without_reboot(monkeypatch, tmp_path):
+    p, calls = _poller(monkeypatch)
+    p.storage = Storage(str(tmp_path / "t.db"))
+    p._handle_blank_receiver(_CFG, {"mac": "AA:BB:CC:DD:EE:FF"}, "192.168.1.174")
+
+    assert calls == []   # a blank receiver is NOT auto-rebooted
+    pending = p.storage.unuploaded()
+    assert len(pending) == 1
+    assert pending[0]["fault"]["code"] == "cli_blank"
+    assert "Skipped" in pending[0]["fault"]["action"]
+    assert pending[0]["nodes"] == []
+    assert pending[0]["receiver"]["mac_address"] == "aa:bb:cc:dd:ee:ff"
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))

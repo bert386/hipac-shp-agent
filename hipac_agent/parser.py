@@ -130,3 +130,13 @@ def detect_cli_fault(text: str) -> dict | None:
         if needle in text:
             return {"code": code, "message": message}
     return None
+
+
+def is_blank_receiver(text: str) -> bool:
+    """A stuck/empty receiver: the receiver_cli screen IS drawn, but the receiver
+    doesn't even know its own identity (Radio Add. still "unknown") and reports
+    zero nodes. Distinct from a healthy receiver that legitimately has 0 nodes
+    (which resolves its own header) or one that's still painting (which shows
+    nodes first). A reboot doesn't reliably clear this — needs manual recovery,
+    so the agent reports it as a skip rather than looping reboots."""
+    return looks_like_receiver(text) and not header_ready(text) and not parse_nodes(text)

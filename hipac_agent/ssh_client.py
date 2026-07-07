@@ -113,6 +113,7 @@ def capture_receiver_cli(
     max_wait: int = 35,
     stable_seconds: int = 3,
     header_seconds: int = 12,
+    blank_seconds: int = 25,
     connect_timeout: int = 15,
     cols: int = 200,
     rows: int = 60,
@@ -181,6 +182,14 @@ def capture_receiver_cli(
             if nc != node_count:
                 node_count = nc
                 node_stable_since = now
+
+            # Fail-fast on a stuck/blank receiver: the screen is drawn but the
+            # header never resolves its own identity AND no nodes appear. A
+            # healthy receiver shows either nodes or its header well before this,
+            # so give up after blank_seconds instead of burning the full max_wait
+            # (keeps the whole scan quick when several receivers are stuck).
+            if nc == 0 and not parser.header_ready(text) and elapsed >= blank_seconds:
+                break
 
             # Complete only when the node list has settled AND the header has
             # loaded its real values (Radio Add. no longer "unknown"). The header
